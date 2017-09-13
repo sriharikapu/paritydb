@@ -40,7 +40,7 @@ impl<K, V> File<K, V> {
 			}
 		};
 
-		file.set_len(len);
+		file.set_len(len)?;
 
 		let view = Mmap::open(&file, Protection::ReadWrite)?.into_view_sync();
 		let (mut len_view, mut view) = view.split_at(8)?;

@@ -9,6 +9,7 @@ memmap = "0.5.2"
 parking_lot = "0.4.5"
 error-chain = "0.11.0-rc.2"
 rayon = "0.8.2"
+tiny-keccak = "1.3"
 
 [dev-dependencies]
 tempdir = "0.3.5"
