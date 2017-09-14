@@ -76,6 +76,7 @@ extern crate rayon;
 
 pub mod field;
 pub mod record;
+pub mod find;
 
 mod database;
 pub mod error;

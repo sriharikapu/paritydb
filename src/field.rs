@@ -9,6 +9,7 @@ pub enum Header {
 	Deleted,
 }
 
+#[derive(Debug)]
 pub enum Error {
 	InvalidHeader,
 	InvalidLength,

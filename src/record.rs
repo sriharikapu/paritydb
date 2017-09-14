@@ -1,4 +1,4 @@
-use std::slice;
+use std::{slice, cmp};
 
 /// A view onto multiple consecutive fields
 #[derive(Debug)]
@@ -7,6 +7,47 @@ pub struct FieldsView<'a> {
 	field_body_size: usize,
 	offset: usize,
 	len: usize,
+}
+
+impl<'a, 'b> PartialEq<&'b [u8]> for FieldsView<'a> {
+	fn eq(&self, slice: &&'b [u8]) -> bool {
+		if slice.len() != self.len {
+			return false;
+		}
+
+		let mut ours = self.offset + self.offset / self.field_body_size;
+		let mut theirs = 0;
+
+		if (self.offset % self.field_body_size) != 0 {
+			let rem = self.field_body_size - (self.offset % self.field_body_size);
+			ours += 1;
+			if &slice[theirs..theirs + rem] != &self.data[ours..ours + rem] {
+				return false;
+			}
+			theirs += rem;
+			ours += rem;
+		}
+
+		let fields = (slice.len() - theirs) / self.field_body_size;
+		for _ in 0..fields {
+			ours += 1;
+			if &slice[theirs..theirs + self.field_body_size] != &self.data[ours..ours + self.field_body_size] {
+				return false;
+			}
+			theirs += self.field_body_size;
+			ours += self.field_body_size;
+		}
+
+		if theirs != self.len {
+			let rem = self.len - theirs;
+			ours += 1;
+			if &slice[theirs..] != &self.data[ours..ours + rem] {
+				return false;
+			}
+		}
+
+		true
+	}
 }
 
 impl<'a> FieldsView<'a> {
@@ -77,6 +118,12 @@ pub struct FieldsViewMut<'a> {
 	field_body_size: usize,
 	offset: usize,
 	len: usize,
+}
+
+impl<'a, 'b> PartialEq<&'b [u8]> for FieldsViewMut<'a> {
+	fn eq(&self, slice: &&'b [u8]) -> bool {
+		self.as_const() == slice
+	}
 }
 
 impl<'a> FieldsViewMut<'a> {
@@ -178,6 +225,10 @@ impl<'a> Record<'a> {
 		self.key.copy_to_slice(slice);
 	}
 
+	pub fn key_is_equal(&self, slice: &[u8]) -> bool {
+		self.key == slice
+	}
+
 	pub fn read_value(&self, slice: &mut [u8]) {
 		self.value.copy_to_slice(slice);
 	}
@@ -201,6 +252,10 @@ impl<'a> RecordMut<'a> {
 
 	pub fn read_key(&self, slice: &mut [u8]) {
 		self.key.copy_to_slice(slice);
+	}
+
+	pub fn key_is_equal(&self, slice: &[u8]) -> bool {
+		self.key == slice
 	}
 
 	pub fn read_value(&self, slice: &mut [u8]) {
@@ -246,6 +301,8 @@ mod tests {
 		let (key, value) = fv.split_at(2);
 		key.copy_to_slice(&mut result_key);
 		value.copy_to_slice(&mut result_value);
+		assert_eq!(key, &expected_key);
+		assert_eq!(value, &expected_value);
 		assert_eq!(expected_key, result_key);
 		assert_eq!(expected_value, result_value);
 	}
@@ -263,6 +320,8 @@ mod tests {
 		let (key, value) = fv.split_at(3);
 		key.copy_to_slice(&mut result_key);
 		value.copy_to_slice(&mut result_value);
+		assert_eq!(key, &expected_key);
+		assert_eq!(value, &expected_value);
 		assert_eq!(expected_key, result_key);
 		assert_eq!(expected_value, result_value);
 	}
@@ -280,6 +339,8 @@ mod tests {
 		let (key, value) = fv.split_at(4);
 		key.copy_to_slice(&mut result_key);
 		value.copy_to_slice(&mut result_value);
+		assert_eq!(key, &expected_key);
+		assert_eq!(value, &expected_value);
 		assert_eq!(expected_key, result_key);
 		assert_eq!(expected_value, result_value);
 	}
@@ -297,6 +358,8 @@ mod tests {
 		let (key, value) = fv.split_at(6);
 		key.copy_to_slice(&mut result_key);
 		value.copy_to_slice(&mut result_value);
+		assert_eq!(key, &expected_key);
+		assert_eq!(value, &expected_value);
 		assert_eq!(expected_key, result_key);
 		assert_eq!(expected_value, result_value);
 	}
