@@ -20,7 +20,7 @@
 //! |...|...........|
 //! ```
 //! 
-//! A header's length is either 1 or 9 bytes.
+//! A header's length is either 0 or 4 bytes.
 //! 
 //! ```
 //!  operation  body_legnth (optional)
@@ -73,6 +73,9 @@ extern crate error_chain;
 extern crate memmap;
 extern crate parking_lot;
 extern crate rayon;
+
+pub mod field;
+pub mod record;
 
 mod database;
 pub mod error;
