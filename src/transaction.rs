@@ -73,6 +73,10 @@ impl Transaction {
 		}
 	}
 
+	pub fn raw(&self) -> &[u8] {
+		&self.operations
+	}
+
 	#[inline]
 	fn push<'a>(&mut self, operation: Operation<'a>) {
 		operation.write_to_buf(&mut self.operations);
@@ -83,6 +87,15 @@ impl Transaction {
 /// Operations integrity is guaranteed.
 pub struct OperationsIterator<'a> {
 	data: &'a [u8],
+}
+
+impl<'a> OperationsIterator<'a> {
+	/// Unsafety is that data may not contain valid operations
+	pub unsafe fn new(data: &'a [u8]) -> Self {
+		OperationsIterator {
+			data,
+		}
+	}
 }
 
 impl<'a> Iterator for OperationsIterator<'a> {
