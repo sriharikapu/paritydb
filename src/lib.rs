@@ -14,7 +14,7 @@
 //! 
 //! Each record is stored in database as a header and body.
 //! 
-//! ```
+//! ```text
 //!  header    body
 //!   /         / 
 //! |...|...........|
@@ -22,7 +22,7 @@
 //! 
 //! A header's length is either 0 or 4 bytes.
 //! 
-//! ```
+//! ```text
 //!  operation  body_legnth (optional)
 //!   /          /
 //! |...|...........|
@@ -30,7 +30,7 @@
 //! 
 //! A body fields always consists of the key and the value
 //! 
-//! ```
+//! ```text
 //!  key      value 
 //!   /         / 
 //! |...|...........|
@@ -39,7 +39,7 @@
 //! The database consist of array of contant-size fields.
 //! Record might be stored in one or more consecutive fields.
 //! 
-//! ```
+//! ```text
 //!  record_x            record_o
 //!   /                    /
 //! |xxxx|xxxx|xx..|....|oooo|o...|
@@ -48,7 +48,7 @@
 //! 
 //! Each field also has it's header and body.
 //! 
-//! ```
+//! ```text
 //!  header    body
 //!   /         / 
 //! |...|...........|
@@ -56,7 +56,7 @@
 //! 
 //! A header is always a single byte which identicates what the body is.
 //! 
-//! ```
+//! ```text
 //! 0 - uninitialized
 //! 1 - insert
 //! 2 - continuation of the record
@@ -73,21 +73,12 @@ extern crate error_chain;
 extern crate memmap;
 extern crate parking_lot;
 extern crate rayon;
+extern crate tiny_keccak;
 
-pub mod field;
-pub mod record;
-pub mod find;
-
-mod database;
 pub mod error;
-pub mod file;
-pub mod hashtable;
-
-pub use database::Database;
-
-/// Number of independent slices a database is dividable into.
-/// Not configurable.
-const DATABASE_SLICES: usize = 16;
-
-type Address = [u8; 20];
-type Hash = [u8; 32];
+pub mod field;
+pub mod find;
+pub mod insert;
+pub mod journal;
+pub mod record;
+pub mod transaction;

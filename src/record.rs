@@ -1,4 +1,4 @@
-use std::{slice, cmp};
+use std::slice;
 
 /// A view onto multiple consecutive fields
 #[derive(Debug)]

@@ -38,6 +38,14 @@ impl<'a> Field<'a> {
 		}
 	}
 
+	#[inline]
+	pub fn is_empty(&self) -> Result<bool, Error> {
+		match self.header()? {
+			Header::Uninitialized | Header::Deleted => Ok(true),
+			_ => Ok(false),
+		}
+	}
+
 	pub fn body(&self) -> Result<&'a [u8], Error> {
 		if self.data.is_empty() {
 			return Err(Error::InvalidLength);
