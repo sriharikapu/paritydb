@@ -254,7 +254,6 @@ impl<'a> RecordMut<'a> {
 
 #[cfg(test)]
 mod tests {
-	use std::io::Read;
 	use super::{FieldsView, RecordMut};
 
 	#[test]
