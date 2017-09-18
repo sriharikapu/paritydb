@@ -10,6 +10,8 @@ use tiny_keccak::sha3_256;
 use transaction::{Transaction, OperationsIterator, Operation};
 use error::Result;
 
+const CHECKSUM_SIZE: usize = 32;
+
 #[derive(Debug, PartialEq)]
 enum JournalOperation<T> {
 	Insert(T),
@@ -81,7 +83,7 @@ impl JournalEra {
 		file.flush()?;
 
 		let mmap = Mmap::open(&file, Protection::Read)?;
-		let cache = unsafe { cache_memory(&mmap.as_slice()[32..]) };
+		let cache = unsafe { cache_memory(&mmap.as_slice()[CHECKSUM_SIZE..]) };
 
 		let era = JournalEra {
 			file: file_path.as_ref().to_path_buf(),
@@ -95,7 +97,7 @@ impl JournalEra {
 	fn open<P: AsRef<Path>>(file: P) -> Result<JournalEra> {
 		let mmap = Mmap::open_path(&file, Protection::Read)?;
 		// TODO: validate checksum here
-		let cache = unsafe { cache_memory(&mmap.as_slice()[32..]) };
+		let cache = unsafe { cache_memory(&mmap.as_slice()[CHECKSUM_SIZE..]) };
 
 		let era = JournalEra {
 			file: file.as_ref().to_path_buf(),

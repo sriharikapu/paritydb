@@ -1,18 +1,37 @@
-pub struct Field<'a> {
-	data: &'a [u8],
-}
+pub const HEADER_SIZE: usize = 1;
+
+pub const HEADER_UNINITIALIZED: u8 = 0;
+pub const HEADER_INSERTED: u8 = 1;
+pub const HEADER_CONTINUED: u8 = 2;
+pub const HEADER_DELETED: u8 = 3;
 
 pub enum Header {
 	Uninitialized,
-	Insert,
-	Continuation,
+	Inserted,
+	Continued,
 	Deleted,
+}
+
+impl Header {
+	pub fn from_u8(byte: u8) -> Option<Header> {
+		match byte {
+			HEADER_UNINITIALIZED => Some(Header::Uninitialized),
+			HEADER_INSERTED => Some(Header::Inserted),
+			HEADER_CONTINUED => Some(Header::Continued),
+			HEADER_DELETED => Some(Header::Deleted),
+			_ => None,
+		}
+	}
 }
 
 #[derive(Debug)]
 pub enum Error {
 	InvalidHeader,
 	InvalidLength,
+}
+
+pub struct Field<'a> {
+	data: &'a [u8],
 }
 
 impl<'a> From<&'a [u8]> for Field<'a> {
@@ -29,13 +48,7 @@ impl<'a> Field<'a> {
 			return Err(Error::InvalidLength);
 		}
 
-		match self.data[0] {
-			0 => Ok(Header::Uninitialized),
-			1 => Ok(Header::Insert),
-			2 => Ok(Header::Continuation),
-			3 => Ok(Header::Deleted),
-			_ => Err(Error::InvalidHeader),
-		}
+		Header::from_u8(self.data[0]).ok_or(Error::InvalidHeader)
 	}
 
 	#[inline]
@@ -51,7 +64,7 @@ impl<'a> Field<'a> {
 			return Err(Error::InvalidLength);
 		}
 
-		Ok(&self.data[1..])
+		Ok(&self.data[HEADER_SIZE..])
 	}
 }
 
@@ -63,16 +76,14 @@ pub struct FieldIterator<'a> {
 
 impl<'a> FieldIterator<'a> {
 	pub fn new(data: &'a [u8], field_body_size: usize) -> Result<Self, Error> {
-		if (data.len() % (field_body_size + 1)) != 0 {
+		if (data.len() % (field_body_size + HEADER_SIZE)) != 0 {
 			return Err(Error::InvalidLength);
 		}
 
-		let iterator = FieldIterator {
+		Ok(FieldIterator {
 			data,
 			field_body_size,
-		};
-
-		Ok(iterator)
+		})
 	}
 }
 
@@ -84,7 +95,7 @@ impl<'a> Iterator for FieldIterator<'a> {
 			return None;
 		}
 
-		let (next_field, new_data) = self.data.split_at(self.field_body_size + 1);
+		let (next_field, new_data) = self.data.split_at(self.field_body_size + HEADER_SIZE);
 		self.data = new_data;
 		Some(next_field.into())
 	}
