@@ -1,4 +1,38 @@
 use std::slice;
+use field::HEADER_SIZE;
+
+macro_rules! on_body_slice {
+	($self:expr, $slice:expr, $fn:ident) => {
+		let field_body_size = $self.field_body_size;
+		let mut ours = $self.offset + HEADER_SIZE * $self.offset / field_body_size;
+		let mut theirs = 0;
+
+		if ($self.offset % field_body_size) != 0 {
+			let rem = field_body_size - ($self.offset % field_body_size);
+			ours += HEADER_SIZE;
+
+			$fn!($slice[theirs..theirs + rem], $self.data[ours..ours + rem]);
+
+			theirs += rem;
+			ours += rem;
+		}
+
+		let fields = ($slice.len() - theirs) / field_body_size;
+		for _ in 0..fields {
+			ours += HEADER_SIZE;
+
+			$fn!($slice[theirs..theirs + field_body_size], $self.data[ours..ours + field_body_size]);
+			theirs += field_body_size;
+			ours += field_body_size;
+		}
+
+		if theirs != $self.len {
+			let rem = $self.len - theirs;
+			ours += HEADER_SIZE;
+			$fn!($slice[theirs..], $self.data[ours..ours + rem]);
+		}
+	}
+}
 
 /// A view onto multiple consecutive fields
 #[derive(Debug)]
@@ -15,36 +49,15 @@ impl<'a, 'b> PartialEq<&'b [u8]> for FieldsView<'a> {
 			return false;
 		}
 
-		let mut ours = self.offset + self.offset / self.field_body_size;
-		let mut theirs = 0;
-
-		if (self.offset % self.field_body_size) != 0 {
-			let rem = self.field_body_size - (self.offset % self.field_body_size);
-			ours += 1;
-			if &slice[theirs..theirs + rem] != &self.data[ours..ours + rem] {
-				return false;
-			}
-			theirs += rem;
-			ours += rem;
-		}
-
-		let fields = (slice.len() - theirs) / self.field_body_size;
-		for _ in 0..fields {
-			ours += 1;
-			if &slice[theirs..theirs + self.field_body_size] != &self.data[ours..ours + self.field_body_size] {
-				return false;
-			}
-			theirs += self.field_body_size;
-			ours += self.field_body_size;
-		}
-
-		if theirs != self.len {
-			let rem = self.len - theirs;
-			ours += 1;
-			if &slice[theirs..] != &self.data[ours..ours + rem] {
-				return false;
+		macro_rules! compare {
+			($a: expr, $b: expr) => {
+				if &$a != &$b {
+					return false;
+				}
 			}
 		}
+
+		on_body_slice!(self, slice, compare);
 
 		true
 	}
@@ -57,7 +70,7 @@ impl<'a> FieldsView<'a> {
 			data,
 			field_body_size,
 			offset: 0,
-			len: data.len() * field_body_size / (field_body_size + 1),
+			len: data.len() * field_body_size / (field_body_size + HEADER_SIZE),
 		}
 	}
 
@@ -78,30 +91,14 @@ impl<'a> FieldsView<'a> {
 
 	pub fn copy_to_slice(&self, slice: &mut [u8]) {
 		assert_eq!(self.len, slice.len(), "slice must have the same size");
-		let mut ours = self.offset + self.offset / self.field_body_size;
-		let mut theirs = 0;
 
-		if (self.offset % self.field_body_size) != 0 {
-			let rem = self.field_body_size - (self.offset % self.field_body_size);
-			ours += 1;
-			slice[theirs..theirs + rem].copy_from_slice(&self.data[ours..ours + rem]);
-			theirs += rem;
-			ours += rem;
+		macro_rules! copy_to_slice {
+			($a: expr, $b: expr) => {
+				$a.copy_from_slice(&$b);
+			}
 		}
 
-		let fields = (slice.len() - theirs) / self.field_body_size;
-		for _ in 0..fields {
-			ours += 1;
-			slice[theirs..theirs + self.field_body_size].copy_from_slice(&self.data[ours..ours + self.field_body_size]);
-			theirs += self.field_body_size;
-			ours += self.field_body_size;
-		}
-
-		if theirs != self.len {
-			let rem = self.len - theirs;
-			ours += 1;
-			slice[theirs..].copy_from_slice(&self.data[ours..ours + rem]);
-		}
+		on_body_slice!(self, slice, copy_to_slice);
 	}
 
 	pub fn split_at(self, pos: usize) -> (Self, Self) {
@@ -130,7 +127,7 @@ impl<'a> FieldsViewMut<'a> {
 	/// Creates new `FieldsViewMut` with no offset
 	pub fn new(data: &'a mut [u8], field_body_size: usize) -> Self {
 		FieldsViewMut {
-			len: data.len() * field_body_size / (field_body_size + 1),
+			len: data.len() * field_body_size / (field_body_size + HEADER_SIZE),
 			data,
 			field_body_size,
 			offset: 0,
@@ -169,30 +166,14 @@ impl<'a> FieldsViewMut<'a> {
 
 	pub fn copy_from_slice(&mut self, slice: &[u8]) {
 		assert_eq!(self.len, slice.len(), "slice must have the same size");
-		let mut ours = self.offset + self.offset / self.field_body_size;
-		let mut theirs = 0;
 
-		if (self.offset % self.field_body_size) != 0 {
-			let rem = self.field_body_size - (self.offset % self.field_body_size);
-			ours += 1;
-			self.data[ours..ours + rem].copy_from_slice(&slice[theirs..theirs + rem]);
-			theirs += rem;
-			ours += rem;
+		macro_rules! copy_from_slice {
+			($a: expr, $b: expr) => {
+				$b.copy_from_slice(&$a);
+			}
 		}
 
-		let fields = (slice.len() - theirs) / self.field_body_size;
-		for _ in 0..fields {
-			ours += 1;
-			self.data[ours..ours + self.field_body_size].copy_from_slice(&slice[theirs..theirs + self.field_body_size]);
-			theirs += self.field_body_size;
-			ours += self.field_body_size;
-		}
-
-		if theirs != self.len {
-			let rem = self.len - theirs;
-			ours += 1;
-			self.data[ours..ours + rem].copy_from_slice(&slice[theirs..]);
-		}
+		on_body_slice!(self, slice, copy_from_slice);
 	}
 
 	pub fn split_at(self, pos: usize) -> (Self, Self) {
@@ -371,7 +352,7 @@ mod tests {
 		let mut data = [0u8; 256];
 		let key = [0x22; 20];
 		let value = [0x33; 220];
-	
+
 		let mut written_key = [0u8; 20];
 		let mut written_value = [0u8; 220];
 		let mut record = RecordMut::new(&mut data, body_size, key_size);

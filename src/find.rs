@@ -1,11 +1,11 @@
-use field::{FieldIterator, Error, Header};
+use field::{FieldIterator, Error, Header, HEADER_SIZE};
 use record::Record;
 
 /// Record location.
 #[derive(Debug, PartialEq)]
 pub enum RecordLocationForReading {
 	/// Deviation from the begining of the data.
-	Offset(u32),
+	Offset(usize),
 	/// Record does not exist or was deleted.
 	NotFound,
 	/// Record does no exist in this memory slice, but may in the next one
@@ -18,16 +18,16 @@ pub fn find_record_location_for_reading(data: &[u8], field_body_size: usize, key
 	for (index, field) in iter.enumerate() {
 		match field.header()? {
 			Header::Uninitialized => return Ok(RecordLocationForReading::NotFound),
-			Header::Insert => {
-				let offset = (field_body_size + 1) * index;
+			Header::Inserted => {
+				let offset = (field_body_size + HEADER_SIZE) * index;
 				let record = Record::new(&data[offset..], field_body_size, key.len());
 				if record.key_is_equal(key) {
-					return Ok(RecordLocationForReading::Offset(offset as u32));
+					return Ok(RecordLocationForReading::Offset(offset));
 				}
 			},
-			Header::Continuation => {},
+			Header::Continued => {},
 			Header::Deleted => {
-				let offset = (field_body_size + 1) * index;
+				let offset = (field_body_size + HEADER_SIZE) * index;
 				let record = Record::new(&data[offset..], field_body_size, key.len());
 				if record.key_is_equal(key) {
 					return Ok(RecordLocationForReading::NotFound);
@@ -56,7 +56,7 @@ pub fn find_empty_space(data: &[u8], field_body_size: usize, space: usize) -> Re
 		result_space = match (field.is_empty()?, result_space) {
 			(true, EmptySpace::NotFound) => {
 				let new_space = EmptySpace::Found {
-					offset: (field_body_size + 1) * index,
+					offset: (field_body_size + HEADER_SIZE) * index,
 					size: field_body_size,
 				};
 				if field_body_size >= space {
@@ -71,7 +71,7 @@ pub fn find_empty_space(data: &[u8], field_body_size: usize, space: usize) -> Re
 					offset,
 					size: new_size,
 				};
-				
+
 				if field_body_size >= space {
 					return Ok(new_space);
 				}
