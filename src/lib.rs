@@ -2,15 +2,15 @@
 //! 
 //! Assumptions:
 //! 
-//! - reads needs to be blazingly fast
+//! - key-value database
 //! 
-//! - inserts not so much
+//! - with blazingly fast reads
+//! 
+//! - not so fast inserts
 //! 
 //! - neither deletes
 //! 
-//! - guaranteed data integrity
-//! 
-//! - guaranteed data existance
+//! - guaranteed ACID (atomicity, consistency, isolation and durability)
 //! 
 //! Each record is stored in database as a header and body.
 //! 
