@@ -1,14 +1,15 @@
+use std::collections::vec_deque::Drain;
 use std::collections::{HashMap, VecDeque};
-use std::path::{PathBuf, Path};
-use std::borrow::Borrow;
+use std::fs;
 use std::hash::{Hash, Hasher};
-use std::fs::{OpenOptions, File, read_dir};
 use std::io::Write;
+use std::path::{PathBuf, Path};
 use std::slice;
+
+use error::Result;
 use memmap::{Mmap, Protection};
 use tiny_keccak::sha3_256;
 use transaction::{Transaction, OperationsIterator, Operation};
-use error::Result;
 
 const CHECKSUM_SIZE: usize = 32;
 
@@ -19,6 +20,7 @@ enum JournalOperation<T> {
 }
 
 /// Unsafe view onto memmap file memory which backs journal.
+#[derive(Debug)]
 struct JournalSlice {
 	key: *const u8,
 	len: usize,
@@ -63,6 +65,7 @@ unsafe fn cache_memory(memory: &[u8]) -> HashMap<JournalSlice, JournalOperation<
 	}).collect()
 }
 
+#[derive(Debug)]
 pub struct JournalEra {
 	file: PathBuf,
 	mmap: Mmap,
@@ -70,28 +73,26 @@ pub struct JournalEra {
 }
 
 impl JournalEra {
+	// TODO [ToDr] Data should be written to a file earlier (for instance when transaction is created).
+	// Consider an API like this:
+	// ```
+	// let mut transaction = Transaction::new();
+	// ...
+	// let prepared = db.prepare(transaction); // writes to a file (doesn't require write access to DB)
+	// db.apply(prepared); // actually insert to db (requires write access)
+	// ```
 	fn create<P: AsRef<Path>>(file_path: P, transaction: &Transaction) -> Result<JournalEra> {
 		let hash = sha3_256(transaction.raw());
-		let mut file = OpenOptions::new()
+		let mut file = fs::OpenOptions::new()
 			.write(true)
-			.read(true)
-			.create(true)
+			.create_new(true)
 			.open(&file_path)?;
 
 		file.write_all(&hash)?;
 		file.write_all(transaction.raw())?;
 		file.flush()?;
 
-		let mmap = Mmap::open(&file, Protection::Read)?;
-		let cache = unsafe { cache_memory(&mmap.as_slice()[CHECKSUM_SIZE..]) };
-
-		let era = JournalEra {
-			file: file_path.as_ref().to_path_buf(),
-			mmap,
-			cache,
-		};
-
-		Ok(era)
+		Self::open(file_path)
 	}
 
 	fn open<P: AsRef<Path>>(file: P) -> Result<JournalEra> {
@@ -118,11 +119,13 @@ impl JournalEra {
 		}
 	}
 
-	fn len(&self) -> usize {
+	/// Returns number of eras currently in journal.
+	pub fn len(&self) -> usize {
 		self.cache.len()
 	}
 
-	fn is_empty(&self) -> bool {
+	/// Returns true if this Journal doesn't have any eras inside.
+	pub fn is_empty(&self) -> bool {
 		self.cache.is_empty()
 	}
 }
@@ -131,6 +134,8 @@ mod dir {
 	use std::fs::read_dir;
 	use std::path::{Path, PathBuf};
 	use error::Result;
+
+	const ERA_EXTENSION: &str = ".era";
 
 	pub fn era_files<P: AsRef<Path>>(dir: P) -> Result<Vec<PathBuf>> {
 		if !dir.as_ref().is_dir() {
@@ -142,6 +147,7 @@ mod dir {
 		let mut era_files: Vec<_> = read_dir(dir)?
 			.collect::<::std::result::Result<Vec<_>, _>>()?
 			.into_iter()
+			.filter(|entry| entry.file_name().to_string_lossy().ends_with(ERA_EXTENSION))
 			.map(|entry| entry.path())
 			.collect();
 
@@ -163,20 +169,20 @@ mod dir {
 
 	pub fn next_era_filename<P: AsRef<Path>>(dir: P, next_index: u64) -> PathBuf {
 		let mut dir = dir.as_ref().to_path_buf();
-		dir.push(format!("{}.era", next_index));
+		dir.push(format!("{}{}", next_index, ERA_EXTENSION));
 		dir
 	}
 }
 
+#[derive(Debug)]
 pub struct Journal {
 	dir: PathBuf,
-	max_eras: usize,
 	eras: VecDeque<JournalEra>,
 	next_era_index: u64,
 }
 
 impl Journal {
-	pub fn new<P: AsRef<Path>>(jdir: P, max_eras: usize) -> Result<Self> {
+	pub fn open<P: AsRef<Path>>(jdir: P) -> Result<Self> {
 		let era_files = dir::era_files(&jdir)?;
 		let next_era_index = dir::next_era_index(&era_files)?;
 
@@ -186,7 +192,6 @@ impl Journal {
 
 		let journal = Journal {
 			dir: jdir.as_ref().to_path_buf(),
-			max_eras,
 			eras,
 			next_era_index,
 		};
@@ -194,20 +199,22 @@ impl Journal {
 		Ok(journal)
 	}
 
-	pub fn push(&mut self, transaction: &Transaction) -> Result<Option<JournalEra>> {
+	pub fn push(&mut self, transaction: &Transaction) -> Result<()> {
 		let new_path = dir::next_era_filename(&self.dir, self.next_era_index);
 		self.next_era_index += 1;
+
 		let new_era = JournalEra::create(new_path, &transaction)?;
 		self.eras.push_back(new_era);
-		if self.eras.len() > self.max_eras {
-			Ok(self.eras.pop_front())
-		} else {
-			Ok(None)
-		}
+
+		Ok(())
 	}
 
-	pub fn pop(&mut self) -> Result<Option<JournalEra>> {
-		Ok(self.eras.pop_back())
+	pub fn drain_front(&mut self, elems: usize) -> Drain<JournalEra> {
+		self.eras.drain(..elems)
+	}
+
+	pub fn len(&self) -> usize {
+		self.eras.len()
 	}
 
 	pub fn get<'a>(&'a self, key: &[u8]) -> Option<&'a [u8]> {
@@ -256,9 +263,10 @@ mod tests {
 	fn test_journal_new() {
 		let temp = TempDir::new("test_journal_new").unwrap();
 
-		let mut journal = Journal::new(temp.path(), 2).unwrap();
-		assert!(journal.push(&Transaction::default()).unwrap().is_none());
-		assert!(journal.push(&Transaction::default()).unwrap().is_none());
-		assert!(journal.push(&Transaction::default()).unwrap().unwrap().is_empty());
+		let mut journal = Journal::open(temp.path()).unwrap();
+		journal.push(&Transaction::default()).unwrap();
+		journal.push(&Transaction::default()).unwrap();
+		journal.push(&Transaction::default()).unwrap();
+		// TODO [ToDr] Update the test
 	}
 }

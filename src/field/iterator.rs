@@ -1,34 +1,5 @@
-pub const HEADER_SIZE: usize = 1;
-
-pub const HEADER_UNINITIALIZED: u8 = 0;
-pub const HEADER_INSERTED: u8 = 1;
-pub const HEADER_CONTINUED: u8 = 2;
-pub const HEADER_DELETED: u8 = 3;
-
-pub enum Header {
-	Uninitialized,
-	Inserted,
-	Continued,
-	Deleted,
-}
-
-impl Header {
-	pub fn from_u8(byte: u8) -> Option<Header> {
-		match byte {
-			HEADER_UNINITIALIZED => Some(Header::Uninitialized),
-			HEADER_INSERTED => Some(Header::Inserted),
-			HEADER_CONTINUED => Some(Header::Continued),
-			HEADER_DELETED => Some(Header::Deleted),
-			_ => None,
-		}
-	}
-}
-
-#[derive(Debug)]
-pub enum Error {
-	InvalidHeader,
-	InvalidLength,
-}
+use field::error::{Error, ErrorKind};
+use field::header::{Header, HEADER_SIZE};
 
 pub struct Field<'a> {
 	data: &'a [u8],
@@ -45,10 +16,10 @@ impl<'a> From<&'a [u8]> for Field<'a> {
 impl<'a> Field<'a> {
 	pub fn header(&self) -> Result<Header, Error> {
 		if self.data.is_empty() {
-			return Err(Error::InvalidLength);
+			return Err(ErrorKind::InvalidLength.into());
 		}
 
-		Header::from_u8(self.data[0]).ok_or(Error::InvalidHeader)
+		Ok(Header::from_u8(self.data[0]).ok_or(ErrorKind::InvalidHeader)?)
 	}
 
 	#[inline]
@@ -61,7 +32,7 @@ impl<'a> Field<'a> {
 
 	pub fn body(&self) -> Result<&'a [u8], Error> {
 		if self.data.is_empty() {
-			return Err(Error::InvalidLength);
+			return Err(ErrorKind::InvalidLength.into());
 		}
 
 		Ok(&self.data[HEADER_SIZE..])
@@ -77,7 +48,7 @@ pub struct FieldIterator<'a> {
 impl<'a> FieldIterator<'a> {
 	pub fn new(data: &'a [u8], field_body_size: usize) -> Result<Self, Error> {
 		if (data.len() % (field_body_size + HEADER_SIZE)) != 0 {
-			return Err(Error::InvalidLength);
+			return Err(ErrorKind::InvalidLength.into());
 		}
 
 		Ok(FieldIterator {

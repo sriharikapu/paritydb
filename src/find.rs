@@ -1,4 +1,5 @@
-use field::{FieldIterator, Error, Header, HEADER_SIZE};
+use field::{Error, Header, HEADER_SIZE};
+use field::iterator::FieldIterator;
 use record::Record;
 
 /// Record location.
@@ -12,7 +13,14 @@ pub enum RecordLocationForReading {
 	OutOfRange,
 }
 
-pub fn find_record_location_for_reading(data: &[u8], field_body_size: usize, key: &[u8]) -> Result<RecordLocationForReading, Error> {
+pub fn find_record_location_for_reading(
+	data: &[u8],
+	record_headers: bool,
+	field_body_size: usize,
+	key: &[u8],
+) -> Result<RecordLocationForReading, Error> {
+	assert!(!record_headers, "Variable-len records are not supported yet.");
+
 	let iter = FieldIterator::new(data, field_body_size)?;
 
 	for (index, field) in iter.enumerate() {
@@ -98,8 +106,8 @@ mod tests {
 		let location = RecordLocationForReading::Offset(0);
 		let location2 = RecordLocationForReading::Offset(4);
 
-		assert_eq!(location, find_record_location_for_reading(&data, body_size, &key).unwrap());
-		assert_eq!(location2, find_record_location_for_reading(&data, body_size, &key2).unwrap());
+		assert_eq!(location, find_record_location_for_reading(&data, false, body_size, &key).unwrap());
+		assert_eq!(location2, find_record_location_for_reading(&data, false, body_size, &key2).unwrap());
 	}
 
 	#[test]
@@ -111,8 +119,8 @@ mod tests {
 		let location = RecordLocationForReading::NotFound;
 		let location2 = RecordLocationForReading::Offset(4);
 
-		assert_eq!(location, find_record_location_for_reading(&data, body_size, &key).unwrap());
-		assert_eq!(location2, find_record_location_for_reading(&data, body_size, &key2).unwrap());
+		assert_eq!(location, find_record_location_for_reading(&data, false, body_size, &key).unwrap());
+		assert_eq!(location2, find_record_location_for_reading(&data, false, body_size, &key2).unwrap());
 	}
 
 	#[test]
@@ -122,7 +130,7 @@ mod tests {
 		let key = [1, 4, 5];
 		let location = RecordLocationForReading::OutOfRange;
 
-		assert_eq!(location, find_record_location_for_reading(&data, body_size, &key).unwrap());
+		assert_eq!(location, find_record_location_for_reading(&data, false, body_size, &key).unwrap());
 	}
 
 	#[test]
@@ -134,8 +142,8 @@ mod tests {
 		let location = RecordLocationForReading::NotFound;
 		let location2 = RecordLocationForReading::NotFound;
 
-		assert_eq!(location, find_record_location_for_reading(&data, body_size, &key).unwrap());
-		assert_eq!(location2, find_record_location_for_reading(&data, body_size, &key2).unwrap());
+		assert_eq!(location, find_record_location_for_reading(&data, false, body_size, &key).unwrap());
+		assert_eq!(location2, find_record_location_for_reading(&data, false, body_size, &key2).unwrap());
 	}
 
 	#[test]

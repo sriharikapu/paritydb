@@ -59,14 +59,14 @@ impl Default for Transaction {
 impl Transaction {
 	/// Append new insert operation to the list of transactions.
 	#[inline]
-	pub fn insert(&mut self, key: &[u8], value: &[u8]) {
-		self.push(Operation::Insert(key, value));
+	pub fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(&mut self, key: K, value: V) {
+		self.push(Operation::Insert(key.as_ref(), value.as_ref()));
 	}
 
 	/// Append new delete operation to the list of transactions.
 	#[inline]
-	pub fn delete(&mut self, key: &[u8]) {
-		self.push(Operation::Delete(key));
+	pub fn delete<K: AsRef<[u8]>>(&mut self, key: K) {
+		self.push(Operation::Delete(key.as_ref()));
 	}
 
 	/// Returns double-ended iterator over all operations in a transaction.
@@ -76,7 +76,7 @@ impl Transaction {
 		}
 	}
 
-	pub fn raw(&self) -> &[u8] {
+	pub(crate) fn raw(&self) -> &[u8] {
 		&self.operations
 	}
 
