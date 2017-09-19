@@ -1,14 +1,15 @@
-use std::collections::{HashMap, VecDeque};
 use std::collections::vec_deque::Drain;
-use std::path::{PathBuf, Path};
+use std::collections::{HashMap, VecDeque};
+use std::fs;
 use std::hash::{Hash, Hasher};
-use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::{PathBuf, Path};
 use std::slice;
+
+use error::Result;
 use memmap::{Mmap, Protection};
 use tiny_keccak::sha3_256;
 use transaction::{Transaction, OperationsIterator, Operation};
-use error::Result;
 
 const CHECKSUM_SIZE: usize = 32;
 
@@ -82,26 +83,16 @@ impl JournalEra {
 	// ```
 	fn create<P: AsRef<Path>>(file_path: P, transaction: &Transaction) -> Result<JournalEra> {
 		let hash = sha3_256(transaction.raw());
-		let mut file = OpenOptions::new()
+		let mut file = fs::OpenOptions::new()
 			.write(true)
-			.read(true)
-			.create(true)
+			.create_new(true)
 			.open(&file_path)?;
 
 		file.write_all(&hash)?;
 		file.write_all(transaction.raw())?;
 		file.flush()?;
 
-		let mmap = Mmap::open(&file, Protection::Read)?;
-		let cache = unsafe { cache_memory(&mmap.as_slice()[CHECKSUM_SIZE..]) };
-
-		let era = JournalEra {
-			file: file_path.as_ref().to_path_buf(),
-			mmap,
-			cache,
-		};
-
-		Ok(era)
+		Self::open(file_path)
 	}
 
 	fn open<P: AsRef<Path>>(file: P) -> Result<JournalEra> {
@@ -144,6 +135,8 @@ mod dir {
 	use std::path::{Path, PathBuf};
 	use error::Result;
 
+	const ERA_EXTENSION: &str = ".era";
+
 	pub fn era_files<P: AsRef<Path>>(dir: P) -> Result<Vec<PathBuf>> {
 		if !dir.as_ref().is_dir() {
 			// TODO: err
@@ -154,6 +147,7 @@ mod dir {
 		let mut era_files: Vec<_> = read_dir(dir)?
 			.collect::<::std::result::Result<Vec<_>, _>>()?
 			.into_iter()
+			.filter(|entry| entry.file_name().to_string_lossy().ends_with(ERA_EXTENSION))
 			.map(|entry| entry.path())
 			.collect();
 
@@ -175,7 +169,7 @@ mod dir {
 
 	pub fn next_era_filename<P: AsRef<Path>>(dir: P, next_index: u64) -> PathBuf {
 		let mut dir = dir.as_ref().to_path_buf();
-		dir.push(format!("{}.era", next_index));
+		dir.push(format!("{}{}", next_index, ERA_EXTENSION));
 		dir
 	}
 }

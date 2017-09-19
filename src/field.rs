@@ -24,10 +24,21 @@ impl Header {
 	}
 }
 
-#[derive(Debug)]
-pub enum Error {
-	InvalidHeader,
-	InvalidLength,
+error_chain! {
+	types {
+		Error, ErrorKind, ResultExt;
+	}
+
+	errors {
+		InvalidHeader {
+			description("invalid header"),
+			display("invalid header"),
+		}
+		InvalidLength {
+			description("invalid length"),
+			display("invalid length"),
+		}
+	}
 }
 
 pub struct Field<'a> {
@@ -45,10 +56,10 @@ impl<'a> From<&'a [u8]> for Field<'a> {
 impl<'a> Field<'a> {
 	pub fn header(&self) -> Result<Header, Error> {
 		if self.data.is_empty() {
-			return Err(Error::InvalidLength);
+			return Err(ErrorKind::InvalidLength.into());
 		}
 
-		Header::from_u8(self.data[0]).ok_or(Error::InvalidHeader)
+		Ok(Header::from_u8(self.data[0]).ok_or(ErrorKind::InvalidHeader)?)
 	}
 
 	#[inline]
@@ -61,7 +72,7 @@ impl<'a> Field<'a> {
 
 	pub fn body(&self) -> Result<&'a [u8], Error> {
 		if self.data.is_empty() {
-			return Err(Error::InvalidLength);
+			return Err(ErrorKind::InvalidLength.into());
 		}
 
 		Ok(&self.data[HEADER_SIZE..])
@@ -77,7 +88,7 @@ pub struct FieldIterator<'a> {
 impl<'a> FieldIterator<'a> {
 	pub fn new(data: &'a [u8], field_body_size: usize) -> Result<Self, Error> {
 		if (data.len() % (field_body_size + HEADER_SIZE)) != 0 {
-			return Err(Error::InvalidLength);
+			return Err(ErrorKind::InvalidLength.into());
 		}
 
 		Ok(FieldIterator {
