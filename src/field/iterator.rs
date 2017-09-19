@@ -1,45 +1,5 @@
-pub const HEADER_SIZE: usize = 1;
-
-pub const HEADER_UNINITIALIZED: u8 = 0;
-pub const HEADER_INSERTED: u8 = 1;
-pub const HEADER_CONTINUED: u8 = 2;
-pub const HEADER_DELETED: u8 = 3;
-
-pub enum Header {
-	Uninitialized,
-	Inserted,
-	Continued,
-	Deleted,
-}
-
-impl Header {
-	pub fn from_u8(byte: u8) -> Option<Header> {
-		match byte {
-			HEADER_UNINITIALIZED => Some(Header::Uninitialized),
-			HEADER_INSERTED => Some(Header::Inserted),
-			HEADER_CONTINUED => Some(Header::Continued),
-			HEADER_DELETED => Some(Header::Deleted),
-			_ => None,
-		}
-	}
-}
-
-error_chain! {
-	types {
-		Error, ErrorKind, ResultExt;
-	}
-
-	errors {
-		InvalidHeader {
-			description("invalid header"),
-			display("invalid header"),
-		}
-		InvalidLength {
-			description("invalid length"),
-			display("invalid length"),
-		}
-	}
-}
+use field::error::{Error, ErrorKind};
+use field::header::{Header, HEADER_SIZE};
 
 pub struct Field<'a> {
 	data: &'a [u8],

@@ -23,7 +23,7 @@
 //! A header's length is either 0 or 4 bytes.
 //!
 //! ```text
-//!  operation  body_legnth (optional)
+//!  operation  body_length (optional)
 //!   /          /
 //! |...|...........|
 //! ```

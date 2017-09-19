@@ -1,4 +1,5 @@
-use field::{FieldIterator, Error, Header, HEADER_SIZE};
+use field::{Error, Header, HEADER_SIZE};
+use field::iterator::FieldIterator;
 use record::Record;
 
 /// Record location.
