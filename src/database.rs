@@ -98,11 +98,11 @@ impl Database {
 		let len = self.journal.len();
 		let max = max.into().unwrap_or(len);
 
-		if len < self.options.journal_eras {
+		if len < self.options.external.journal_eras {
 			return Ok(())
 		}
 
-		let to_flush = cmp::min(len - self.options.journal_eras, max);
+		let to_flush = cmp::min(len - self.options.external.journal_eras, max);
 
 		for _era in self.journal.drain_front(to_flush) {
 			// TODO [ToDr] Apply era to the database
@@ -114,8 +114,8 @@ impl Database {
 
 	pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<Value>> {
 		let key = key.as_ref();
-		if key.len() != self.options.key_len {
-			return Err(ErrorKind::InvalidKeyLen(self.options.key_len, key.len()).into());
+		if key.len() != self.options.external.key_len {
+			return Err(ErrorKind::InvalidKeyLen(self.options.external.key_len, key.len()).into());
 		}
 
 		if let Some(res) = self.journal.get(key) {
@@ -125,11 +125,11 @@ impl Database {
 		let field_body_size = self.options.field_body_size;
 		let value_size = self.options.value_size;
 
-		let key = Key::new(key, self.options.key_index_bits);
+		let key = Key::new(key, self.options.external.key_index_bits);
 		let offset = key.prefix as usize * self.options.record_offset;
 		let data = unsafe { &self.mmap.as_slice()[offset .. ] };
 
-		match find::find_record(data, field_body_size, value_size, &key)? {
+		match find::find_record(data, field_body_size, value_size, key.key)? {
 			find::RecordResult::Found(record) => Ok(Some(Value::Record(record))),
 			find::RecordResult::NotFound => Ok(None),
 			find::RecordResult::OutOfRange => unimplemented!(),

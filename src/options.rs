@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use error::Result;
 use field;
 use record;
@@ -69,14 +68,6 @@ pub(crate) struct InternalOptions {
 	pub field_body_size: usize,
 	pub initial_db_size: u64,
 	pub record_offset: usize,
-}
-
-impl Deref for InternalOptions {
-	type Target = Options;
-
-	fn deref(&self) -> &Self::Target {
-		&self.external
-	}
 }
 
 impl InternalOptions {

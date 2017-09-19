@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 pub struct Key<'a> {
 	pub key: &'a [u8],
 	pub prefix: u32,
@@ -30,14 +28,6 @@ impl<'a> Key<'a> {
 		}
 
 		prefix
-	}
-}
-
-impl<'a> Deref for Key<'a> {
-	type Target = [u8];
-
-	fn deref(&self) -> &Self::Target {
-		&self.key
 	}
 }
 
