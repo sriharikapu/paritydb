@@ -7,46 +7,14 @@ use find;
 use journal::Journal;
 use memmap::{Mmap, Protection};
 use transaction::Transaction;
-
-#[derive(Debug, PartialEq)]
-pub struct Options {
-	/// Number of eras to keep in the journal.
-	pub journal_eras: usize,
-	/// Initial size of the database - the file will be allocated right after the DB is created.
-	pub initial_db_size: u64,
-	/// The DB will re-allocate to twice as big size in case there is more
-	/// than `extend_threshold_percent` occupied entries.
-	pub extend_threshold_percent: u8,
-	pub field_body_size: usize,
-}
-
-impl Default for Options {
-	fn default() -> Self {
-		Options {
-			journal_eras: 5,
-			initial_db_size: 512 * 1024 * 1024,
-			extend_threshold_percent: 80,
-			field_body_size: 63,
-		}
-	}
-}
-
-impl Options {
-	pub fn with<F>(f: F) -> Self where
-		F: FnOnce(&mut Self),
-	{
-		let mut options = Options::default();
-		f(&mut options);
-		options
-	}
-}
+use options::{Options, InternalOptions};
 
 const DB_FILE: &str = "data.db";
 
 #[derive(Debug)]
 pub struct Database {
 	journal: Journal,
-	options: Options,
+	options: InternalOptions,
 	mmap: Mmap,
 	path: PathBuf,
 }
@@ -54,6 +22,7 @@ pub struct Database {
 impl Database {
 	/// Creates new database at given location.
 	pub fn create<P: AsRef<Path>>(path: P, options: Options) -> Result<Self> {
+		let options = InternalOptions::from_external(options)?;
 		let db_file_path = path.as_ref().join(DB_FILE);
 		let mut file = fs::OpenOptions::new()
 			.write(true)
@@ -62,11 +31,12 @@ impl Database {
 		file.set_len(options.initial_db_size)?;
 		file.flush()?;
 
-		Self::open(path, options)
+		Self::open(path, options.external)
 	}
 
 	/// Opens an existing DB at given location.
 	pub fn open<P: AsRef<Path>>(path: P, options: Options) -> Result<Self> {
+		let options = InternalOptions::from_external(options)?;
 		let journal = Journal::open(&path)?;
 
 		let db_file_path = path.as_ref().join(DB_FILE);

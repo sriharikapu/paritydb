@@ -81,5 +81,6 @@ pub mod field;
 pub mod find;
 pub mod insert;
 pub mod journal;
+pub mod options;
 pub mod record;
 pub mod transaction;
