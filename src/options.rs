@@ -1,6 +1,7 @@
 use std::ops::Deref;
 use error::Result;
-use field::HEADER_SIZE;
+use field;
+use record;
 
 #[derive(Debug, PartialEq)]
 pub enum ValuesLen {
@@ -12,15 +13,14 @@ impl ValuesLen {
 	pub(crate) fn size(&self) -> usize {
 		match *self {
 			ValuesLen::Constant(x) => x,
-			ValuesLen::Variable { average } => average,
+			ValuesLen::Variable { average } => record::HEADER_SIZE + average,
 		}
 	}
 
-	pub(crate) fn is_variable(&self) -> bool {
-		if let ValuesLen::Variable { .. } = *self {
-			true
-		} else {
-			false
+	pub(crate) fn to_value_size(&self) -> record::ValueSize {
+		match *self {
+			ValuesLen::Constant(size) => record::ValueSize::Constant(size),
+			ValuesLen::Variable { .. } => record::ValueSize::Variable,
 		}
 	}
 }
@@ -65,8 +65,10 @@ impl Options {
 #[derive(Debug, PartialEq)]
 pub(crate) struct InternalOptions {
 	pub external: Options,
+	pub value_size: record::ValueSize,
 	pub field_body_size: usize,
 	pub initial_db_size: u64,
+	pub record_offset: usize,
 }
 
 impl Deref for InternalOptions {
@@ -87,13 +89,22 @@ impl InternalOptions {
 			panic!("key_index_bits too large");
 		}
 
+		if external.key_index_bits > 32 || external.key_index_bits == 0 {
+			panic!("key_index_bits too large. Prefixes up to 32 bits are supported.")
+		}
+
+		let value_size = external.value_len.to_value_size();
 		let field_body_size = external.key_len + external.value_len.size();
-		let initial_db_size = (2u64 << external.key_index_bits) * (field_body_size as u64 + HEADER_SIZE as u64);
+		let record_offset = field_body_size as usize + field::HEADER_SIZE as usize;
+		// +1 for last record with prefix 0xffff....
+		let initial_db_size = (2u64 << external.key_index_bits + 1) * record_offset as u64;
 
 		Ok(InternalOptions {
 			external,
+			value_size,
 			field_body_size,
 			initial_db_size,
+			record_offset,
 		})
 	}
 }
