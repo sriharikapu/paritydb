@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::{cmp, fs};
 
-use error::Result;
+use error::{ErrorKind, Result};
 use find;
 use journal::Journal;
 use memmap::{Mmap, Protection};
@@ -52,6 +52,7 @@ impl Database {
 
 	/// Commits changes in the transaction.
 	pub fn commit(&mut self, tx: &Transaction) -> Result<()> {
+		// TODO [ToDr] Validate key size
 		self.journal.push(tx)?;
 		Ok(())
 	}
@@ -76,12 +77,20 @@ impl Database {
 	}
 
 	pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<&[u8]>> {
-		if let Some(res) = self.journal.get(key.as_ref()) {
+		let key = key.as_ref();
+		if key.len() != self.options.key_len {
+			return Err(ErrorKind::InvalidKeyLen(self.options.key_len, key.len()).into());
+		}
+
+		if let Some(res) = self.journal.get(key) {
 			return Ok(Some(res));
 		}
 
+		let record_headers = self.options.value_len.is_variable();
+		let field_body_size = self.options.field_body_size;
 		let data = unsafe { self.mmap.as_slice() };
-		match find::find_record_location_for_reading(data, self.options.field_body_size, key.as_ref())? {
+
+		match find::find_record_location_for_reading(data, record_headers, field_body_size, key)? {
 			find::RecordLocationForReading::Offset(offset) => {
 				unimplemented!()
 			},
@@ -98,6 +107,7 @@ mod tests {
 	extern crate tempdir;
 
 	use super::{Database, Options};
+	use error::ErrorKind;
 	use transaction::Transaction;
 
 	#[test]
@@ -106,6 +116,7 @@ mod tests {
 
 		let mut db = Database::create(temp.path(), Options::with(|mut options| {
 			options.journal_eras = 0;
+			options.key_len = 3;
 		})).unwrap();
 
 		let mut tx = Transaction::default();
@@ -132,5 +143,17 @@ mod tests {
 
 		// assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
 		// assert_eq!(db.get("cde").unwrap(), None);
+	}
+
+	#[test]
+	fn should_validate_key_length() {
+		let temp = tempdir::TempDir::new("create_insert_and_query").unwrap();
+
+		let mut db = Database::create(temp.path(), Options::with(|mut options| {
+			options.journal_eras = 0;
+			options.key_len = 3;
+		})).unwrap();
+
+		assert_eq!(*db.get("a").unwrap_err().kind(), ErrorKind::InvalidKeyLen(3, 1));
 	}
 }

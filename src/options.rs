@@ -5,14 +5,22 @@ use field::HEADER_SIZE;
 #[derive(Debug, PartialEq)]
 pub enum ValuesLen {
 	Constant(usize),
-	Dynamic { average: usize },
+	Variable { average: usize },
 }
 
 impl ValuesLen {
-	fn size(&self) -> usize {
+	pub(crate) fn size(&self) -> usize {
 		match *self {
 			ValuesLen::Constant(x) => x,
-			ValuesLen::Dynamic { average } => average,
+			ValuesLen::Variable { average } => average,
+		}
+	}
+
+	pub(crate) fn is_variable(&self) -> bool {
+		if let ValuesLen::Variable { .. } = *self {
+			true
+		} else {
+			false
 		}
 	}
 }
