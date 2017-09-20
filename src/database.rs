@@ -5,11 +5,47 @@ use std::{cmp, fs};
 use error::{ErrorKind, Result};
 use find;
 use journal::Journal;
+use key::Key;
 use memmap::{Mmap, Protection};
-use transaction::Transaction;
 use options::{Options, InternalOptions};
+use record::Record;
+use transaction::Transaction;
 
 const DB_FILE: &str = "data.db";
+
+#[derive(Debug)]
+pub enum Value<'a> {
+	Raw(&'a [u8]),
+	Record(Record<'a>),
+}
+
+impl<'a> Value<'a> {
+	pub fn to_vec(&self) -> Vec<u8> {
+		match *self {
+			Value::Raw(ref slice) => slice.to_vec(),
+			Value::Record(ref record) => {
+				let mut v = Vec::new();
+				v.resize(record.value_len(), 0);
+				record.read_value(&mut v);
+				v
+			}
+		}
+	}
+}
+
+// TODO [ToDr] Optimize equality
+impl<'a, T: AsRef<[u8]>> PartialEq<T> for Value<'a> {
+	fn eq(&self, other: &T) -> bool {
+		&*self.to_vec() == other.as_ref()
+	}
+}
+
+// TODO [ToDr] Optimize equality
+impl<'a, 'b> PartialEq<Value<'b>> for Value<'b> {
+	fn eq(&self, other: &Value<'b>) -> bool {
+		self.to_vec() == other.to_vec()
+	}
+}
 
 #[derive(Debug)]
 pub struct Database {
@@ -62,11 +98,11 @@ impl Database {
 		let len = self.journal.len();
 		let max = max.into().unwrap_or(len);
 
-		if len < self.options.journal_eras {
+		if len < self.options.external.journal_eras {
 			return Ok(())
 		}
 
-		let to_flush = cmp::min(len - self.options.journal_eras, max);
+		let to_flush = cmp::min(len - self.options.external.journal_eras, max);
 
 		for _era in self.journal.drain_front(to_flush) {
 			// TODO [ToDr] Apply era to the database
@@ -76,27 +112,27 @@ impl Database {
 		Ok(())
 	}
 
-	pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<&[u8]>> {
+	pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<Value>> {
 		let key = key.as_ref();
-		if key.len() != self.options.key_len {
-			return Err(ErrorKind::InvalidKeyLen(self.options.key_len, key.len()).into());
+		if key.len() != self.options.external.key_len {
+			return Err(ErrorKind::InvalidKeyLen(self.options.external.key_len, key.len()).into());
 		}
 
 		if let Some(res) = self.journal.get(key) {
-			return Ok(Some(res));
+			return Ok(Some(Value::Raw(res)));
 		}
 
-		let record_headers = self.options.value_len.is_variable();
 		let field_body_size = self.options.field_body_size;
-		let data = unsafe { self.mmap.as_slice() };
+		let value_size = self.options.value_size;
 
-		match find::find_record_location_for_reading(data, record_headers, field_body_size, key)? {
-			find::RecordLocationForReading::Offset(offset) => {
-				unimplemented!()
-			},
-			find::RecordLocationForReading::NotFound => Ok(None),
-			// TODO [ToDr] ?
-			find::RecordLocationForReading::OutOfRange => unimplemented!(),
+		let key = Key::new(key, self.options.external.key_index_bits);
+		let offset = key.prefix as usize * self.options.record_offset;
+		let data = unsafe { &self.mmap.as_slice()[offset .. ] };
+
+		match find::find_record(data, field_body_size, value_size, key.key)? {
+			find::RecordResult::Found(record) => Ok(Some(Value::Record(record))),
+			find::RecordResult::NotFound => Ok(None),
+			find::RecordResult::OutOfRange => unimplemented!(),
 		}
 	}
 }
@@ -149,7 +185,7 @@ mod tests {
 	fn should_validate_key_length() {
 		let temp = tempdir::TempDir::new("create_insert_and_query").unwrap();
 
-		let mut db = Database::create(temp.path(), Options::with(|mut options| {
+		let db = Database::create(temp.path(), Options::with(|mut options| {
 			options.journal_eras = 0;
 			options.key_len = 3;
 		})).unwrap();

@@ -1,19 +1,57 @@
 use field::view::{FieldsView, FieldsViewMut};
 
+/// Optional size of header for variable-len records.
+pub const HEADER_SIZE: usize = 4;
+
+/// Value size
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum ValueSize {
+	/// Variable record size (needs to be read from header).
+	Variable,
+	/// Constant record size.
+	Constant(usize),
+}
+
 /// A view onto database record.
+#[derive(Debug)]
 pub struct Record<'a> {
 	key: FieldsView<'a>,
 	value: FieldsView<'a>,
+	len: usize,
 }
 
 impl<'a> Record<'a> {
-	pub fn new(data: &'a [u8], field_body_size: usize, key_size: usize) -> Self {
+	pub fn new(data: &'a [u8], field_body_size: usize, value_size: ValueSize, key_size: usize) -> Self {
 		let view = FieldsView::new(data, field_body_size);
-		let (key, value) = view.split_at(key_size);
-		Record {
-			key,
-			value,
+		let (key, rest) = view.split_at(key_size);
+
+		// TODO [ToDr] Should read record length lazily.
+		match value_size {
+			ValueSize::Constant(value_size) => {
+				let (value, _) = rest.split_at(value_size);
+
+				Record { key, value, len: value_size }
+			},
+			ValueSize::Variable => {
+				let (header, rest) = rest.split_at(HEADER_SIZE);
+				let value_len = Self::read_value_len(header) as usize;
+				let (value, _) = rest.split_at(value_len);
+
+				Record { key, value, len: value_len }
+			}
 		}
+	}
+
+	fn read_value_len(field: FieldsView<'a>) -> u32 {
+		let mut data = [0; HEADER_SIZE];
+		field.copy_to_slice(&mut data);
+
+		let mut val = data[0] as u32;
+		for i in 1..HEADER_SIZE {
+			val <<= 8;
+			val |= data[i] as u32;
+		}
+		val
 	}
 
 	pub fn read_key(&self, slice: &mut [u8]) {
@@ -26,6 +64,10 @@ impl<'a> Record<'a> {
 
 	pub fn read_value(&self, slice: &mut [u8]) {
 		self.value.copy_to_slice(slice);
+	}
+
+	pub fn value_len(&self) -> usize {
+		self.len
 	}
 }
 
