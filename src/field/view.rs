@@ -1,4 +1,4 @@
-use std::slice;
+use std::{cmp, slice};
 use field::header::HEADER_SIZE;
 
 macro_rules! on_body_slice {
@@ -8,7 +8,7 @@ macro_rules! on_body_slice {
 		let mut theirs = 0;
 
 		if ($self.offset % field_body_size) != 0 {
-			let rem = field_body_size - ($self.offset % field_body_size);
+			let rem = cmp::min($slice.len(), field_body_size - ($self.offset % field_body_size));
 			ours += HEADER_SIZE;
 
 			$fn!($slice[theirs..theirs + rem], $self.data[ours..ours + rem]);
@@ -22,6 +22,7 @@ macro_rules! on_body_slice {
 			ours += HEADER_SIZE;
 
 			$fn!($slice[theirs..theirs + field_body_size], $self.data[ours..ours + field_body_size]);
+
 			theirs += field_body_size;
 			ours += field_body_size;
 		}
@@ -29,6 +30,7 @@ macro_rules! on_body_slice {
 		if theirs != $self.len {
 			let rem = $self.len - theirs;
 			ours += HEADER_SIZE;
+
 			$fn!($slice[theirs..], $self.data[ours..ours + rem]);
 		}
 	}
@@ -102,6 +104,9 @@ impl<'a> FieldsView<'a> {
 	}
 
 	pub fn split_at(self, pos: usize) -> (Self, Self) {
+		assert!(self.len >= pos, "Cannot split beyond length: {} < {} ", self.len, pos);
+		assert!(self.data.len() >= self.offset + pos, "Cannot split beyond data length: {} < {}", self.data.len(), self.offset + pos);
+
 		let left = FieldsView::with_options(self.data, self.field_body_size, self.offset, pos);
 		let right = FieldsView::with_options(self.data, self.field_body_size, self.offset + pos, self.len - pos);
 		(left, right)
@@ -177,6 +182,8 @@ impl<'a> FieldsViewMut<'a> {
 	}
 
 	pub fn split_at(self, pos: usize) -> (Self, Self) {
+		assert!(self.len >= pos, "Cannot split beyond FieldsView length: {} < {} ", self.len, pos);
+		assert!(self.data.len() >= self.offset + pos, "Cannot split beyond data length: {} < {}", self.data.len(), self.offset + pos);
 		// TODO: left and right part of FieldsViewMut should never access the counterpart, but it would
 		// be safer to guarantee that without using unsafe code. It can be done entirely with `slice::split_at_mut`.
 		let copied_data = unsafe { slice::from_raw_parts_mut(self.data.as_mut_ptr(), self.data.len()) };
@@ -200,6 +207,32 @@ mod tests {
 		let fv = FieldsView::new(&data, body_size);
 		fv.copy_to_slice(&mut result);
 		assert_eq!(expected, result);
+	}
+
+	#[test]
+	fn test_fields_view_split_at_short() {
+		let body_size = 5;
+		let data = [0, 1, 2, 3, 4, 5];
+		let expected_key = [1, 2];
+		let expected_value = [3];
+		let expected_rest = [4, 5];
+
+		let mut result_key = [0u8; 2];
+		let mut result_value = [0u8; 1];
+		let mut result_rest = [0u8; 2];
+
+		let fv = FieldsView::new(&data, body_size);
+		let (key, value) = fv.split_at(2);
+		let (value, rest) = value.split_at(1);
+		key.copy_to_slice(&mut result_key);
+		value.copy_to_slice(&mut result_value);
+		rest.copy_to_slice(&mut result_rest);
+		assert_eq!(key, &expected_key);
+		assert_eq!(value, &expected_value);
+		assert_eq!(rest, &expected_rest);
+		assert_eq!(expected_key, result_key);
+		assert_eq!(expected_value, result_value);
+		assert_eq!(expected_rest, result_rest);
 	}
 
 	#[test]

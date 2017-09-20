@@ -24,7 +24,7 @@ impl<'a> Value<'a> {
 		match *self {
 			Value::Raw(ref slice) => slice.to_vec(),
 			Value::Record(ref record) => {
-				let mut v = Vec::new();
+				let mut v = Vec::with_capacity(record.value_len());
 				v.resize(record.value_len(), 0);
 				record.read_value(&mut v);
 				v

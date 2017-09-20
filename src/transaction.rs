@@ -139,8 +139,7 @@ impl<'a> DoubleEndedIterator for OperationsIterator<'a> {
 
 		let last = self.data.len() - 1;
 		match self.data[last] {
-			// insert
-			0 => {
+			OPERATION_INSERT => {
 				let key_len = LittleEndian::read_u32(&self.data[last - 8..last - 4]) as usize;
 				let value_len = LittleEndian::read_u32(&self.data[last - 4..last]) as usize;
 				let key_end = last - 8 - value_len;
@@ -150,8 +149,7 @@ impl<'a> DoubleEndedIterator for OperationsIterator<'a> {
 				self.data = &self.data[..key_begin - 9];
 				Some(o)
 			},
-			// delete
-			1 => {
+			OPERATION_DELETE => {
 				let key_len = LittleEndian::read_u32(&self.data[last - 4..last]) as usize;
 				let key_end = last - 4;
 				let key_begin = key_end - key_len;

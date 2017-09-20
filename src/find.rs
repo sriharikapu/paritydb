@@ -26,16 +26,15 @@ pub fn find_record<'a>(
 			Header::Uninitialized => return Ok(RecordResult::NotFound),
 			Header::Inserted => {
 				let offset = (field_body_size + HEADER_SIZE) * index;
-				let record = Record::new(&data[offset..], field_body_size, value_size, key.len());
-				if record.key_is_equal(key) {
+				if Record::extract_key(&data[offset..], field_body_size, key.len()) == key {
+					let record = Record::new(&data[offset..], field_body_size, value_size, key.len());
 					return Ok(RecordResult::Found(record));
 				}
 			},
 			Header::Continued => {},
 			Header::Deleted => {
 				let offset = (field_body_size + HEADER_SIZE) * index;
-				let record = Record::new(&data[offset..], field_body_size, value_size, key.len());
-				if record.key_is_equal(key) {
+				if Record::extract_key(&data[offset..], field_body_size, key.len()) == key {
 					return Ok(RecordResult::NotFound);
 				}
 			}
