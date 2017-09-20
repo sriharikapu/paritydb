@@ -70,6 +70,7 @@
 extern crate byteorder;
 #[macro_use]
 extern crate error_chain;
+extern crate hex_slice;
 extern crate memmap;
 extern crate parking_lot;
 extern crate rayon;

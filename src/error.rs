@@ -2,6 +2,7 @@
 #![allow(missing_docs)]
 
 use std::{io, num};
+use std::path::PathBuf;
 
 use field;
 
@@ -20,6 +21,18 @@ error_chain! {
 			description("Invalid key length")
 			display("Invalid key length. Expected: {}, got: {}", expected, got),
 		}
+		CorruptedJournal(path: PathBuf, msg: String) {
+			description("Hash of data is invalid"),
+			display("Database journal corruption detected in file at {}. {}", path.display(), msg),
+		}
+		InvalidJournalLocation(path: PathBuf) {
+			description("Path to journal is a file"),
+			display("Expected a directory at {}, got file.", path.display()),
+		}
+		JournalEraMissing(idx: u64) {
+			description("Eras are not consecutive"),
+			display("Missing era file with index {}", idx),
+		}
 	}
 }
 
@@ -30,6 +43,10 @@ impl PartialEq for ErrorKind {
 		match (self, other) {
 			(&InvalidKeyLen(expected, got), &InvalidKeyLen(expected2, got2))
 				if expected == expected2 && got == got2 => true,
+			(&CorruptedJournal(ref path, ref msg), &CorruptedJournal(ref path2, ref msg2))
+				if path == path2 && msg == msg2 => true,
+			(&InvalidJournalLocation(ref path), &InvalidJournalLocation(ref path2))
+				if path == path2 => true,
 			_ => false,
 		}
 	}

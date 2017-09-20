@@ -5,9 +5,10 @@ authors = ["debris <marek.kotewicz@gmail.com>"]
 
 [dependencies]
 byteorder = "1.1"
+error-chain = "0.11.0-rc.2"
+hex-slice = "0.1.0"
 memmap = "0.5.2"
 parking_lot = "0.4.5"
-error-chain = "0.11.0-rc.2"
 rayon = "0.8.2"
 tiny-keccak = "1.3"
 
