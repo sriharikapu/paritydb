@@ -33,6 +33,10 @@ error_chain! {
 			description("Eras are not consecutive"),
 			display("Missing era file with index {}", idx),
 		}
+		InvalidOptions(field: &'static str, error: String) {
+			description("Invalid options were provided"),
+			display("Invalid value of `{}`: {}", field, error),
+		}
 	}
 }
 
@@ -47,6 +51,10 @@ impl PartialEq for ErrorKind {
 				if path == path2 && msg == msg2 => true,
 			(&InvalidJournalLocation(ref path), &InvalidJournalLocation(ref path2))
 				if path == path2 => true,
+			(&JournalEraMissing(idx), &JournalEraMissing(idx2))
+				if idx == idx2 => true,
+			(&InvalidOptions(field, ref error), &InvalidOptions(field2, ref error2))
+				if field == field2 && error == error2 => true,
 			_ => false,
 		}
 	}
