@@ -6,7 +6,8 @@ use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::slice;
 
-use error::Result;
+use error::{ErrorKind, Result};
+use hex_slice::AsHex;
 use memmap::{Mmap, Protection};
 use tiny_keccak::sha3_256;
 use transaction::{Transaction, OperationsIterator, Operation};
@@ -97,8 +98,23 @@ impl JournalEra {
 
 	fn open<P: AsRef<Path>>(file: P) -> Result<JournalEra> {
 		let mmap = Mmap::open_path(&file, Protection::Read)?;
-		// TODO: validate checksum here
-		let cache = unsafe { cache_memory(&mmap.as_slice()[CHECKSUM_SIZE..]) };
+		let cache = {
+			let checksum = unsafe { &mmap.as_slice()[..CHECKSUM_SIZE] };
+			let data = unsafe { &mmap.as_slice()[CHECKSUM_SIZE..] };
+			let hash = sha3_256(data);
+			if  hash != checksum {
+				return Err(ErrorKind::CorruptedJournal(
+					file.as_ref().into(),
+					format!(
+						"Expected: {:02x}, Got: {:02x}",
+						hash.as_hex(),
+						checksum.as_hex(),
+					)
+				).into());
+			}
+
+			unsafe { cache_memory(data) }
+		};
 
 		let era = JournalEra {
 			file: file.as_ref().to_path_buf(),
@@ -133,16 +149,14 @@ impl JournalEra {
 mod dir {
 	use std::fs::read_dir;
 	use std::path::{Path, PathBuf};
-	use error::Result;
+	use error::{ErrorKind, Result};
 
 	const ERA_EXTENSION: &str = ".era";
 
 	pub fn era_files<P: AsRef<Path>>(dir: P) -> Result<Vec<PathBuf>> {
 		if !dir.as_ref().is_dir() {
-			// TODO: err
+			return Err(ErrorKind::InvalidJournalLocation(dir.as_ref().into()).into());
 		}
-
-		// TODO: validate eras consecutiveness
 
 		let mut era_files: Vec<_> = read_dir(dir)?
 			.collect::<::std::result::Result<Vec<_>, _>>()?
@@ -153,16 +167,31 @@ mod dir {
 
 		era_files.sort();
 
+		let mut last = None;
+
+		for era in &era_files {
+			let idx = era_index(era)?;
+			match last.take() {
+				Some(era) if idx == era + 1 => {},
+				None => {},
+				_ => {
+					return Err(ErrorKind::JournalEraMissing(idx).into());
+				}
+			}
+			last = Some(idx);
+		}
+
 		Ok(era_files)
+	}
+
+	fn era_index<P: AsRef<Path>>(path: P) -> Result<u64> {
+		let path = path.as_ref().display().to_string();
+		Ok(1u64 + path[..path.len() - ERA_EXTENSION.len()].parse::<u64>()?)
 	}
 
 	pub fn next_era_index<P: AsRef<Path>>(files: &[P]) -> Result<u64> {
 		match files.last() {
-			Some(path) => {
-				// .era
-				let path = path.as_ref().display().to_string();
-				Ok(1u64 + path[..path.len() - 4].parse::<u64>()?)
-			},
+			Some(path) => era_index(path),
 			None => Ok(0),
 		}
 	}
@@ -236,6 +265,9 @@ mod tests {
 	extern crate tempdir;
 
 	use self::tempdir::TempDir;
+	use std::fs;
+	use std::io::Write;
+	use error::ErrorKind;
 	use transaction::Transaction;
 	use super::{Journal, JournalEra, JournalOperation};
 
@@ -267,6 +299,36 @@ mod tests {
 		journal.push(&Transaction::default()).unwrap();
 		journal.push(&Transaction::default()).unwrap();
 		journal.push(&Transaction::default()).unwrap();
-		// TODO [ToDr] Update the test
+		assert_eq!(journal.len(), 3);
+
+		journal.drain_front(2);
+
+		assert_eq!(journal.len(), 1);
+	}
+
+	#[test]
+	fn should_detect_corrupted_era() {
+		let temp = TempDir::new("test_era_create").unwrap();
+		let mut path = temp.path().to_path_buf();
+		path.push("file");
+
+		let mut tx = Transaction::default();
+		tx.insert(b"key", b"value");
+		tx.insert(b"key2", b"value");
+		tx.insert(b"key3", b"value");
+		tx.insert(b"key2", b"value2");
+		tx.delete(b"key3");
+		let _ = JournalEra::create(&path, &tx).unwrap();
+
+		// alter hash
+		let mut file = fs::OpenOptions::new().write(true).open(&path).unwrap();
+		file.write_all(&mut [1, 2, 3]).unwrap();
+		file.flush().unwrap();
+
+		// Try to open era
+		assert_eq!(JournalEra::open(&path).unwrap_err().kind(), &ErrorKind::CorruptedJournal(
+			path,
+			"Expected: [b5 14 31 d0 7d c8 57 22 19 5a d8 7e a7 88 da 5d 9d 3d 15 46 55 3a 8f 89 15 f0 91 b1 52 98 a7 3c], Got: [1 2 3 d0 7d c8 57 22 19 5a d8 7e a7 88 da 5d 9d 3d 15 46 55 3a 8f 89 15 f0 91 b1 52 98 a7 3c]".into()
+		));
 	}
 }
