@@ -1,4 +1,5 @@
 use std::{cmp, slice};
+
 use field::header::HEADER_SIZE;
 
 macro_rules! on_body_slice {
@@ -11,7 +12,7 @@ macro_rules! on_body_slice {
 			let rem = cmp::min($slice.len(), field_body_size - ($self.offset % field_body_size));
 			ours += HEADER_SIZE;
 
-			$fn!($slice[theirs..theirs + rem], $self.data[ours..ours + rem]);
+			$fn!($self.data[ours..ours + rem], $slice[theirs..theirs + rem]);
 
 			theirs += rem;
 			ours += rem;
@@ -21,7 +22,7 @@ macro_rules! on_body_slice {
 		for _ in 0..fields {
 			ours += HEADER_SIZE;
 
-			$fn!($slice[theirs..theirs + field_body_size], $self.data[ours..ours + field_body_size]);
+			$fn!($self.data[ours..ours + field_body_size], $slice[theirs..theirs + field_body_size]);
 
 			theirs += field_body_size;
 			ours += field_body_size;
@@ -31,7 +32,7 @@ macro_rules! on_body_slice {
 			let rem = $self.len - theirs;
 			ours += HEADER_SIZE;
 
-			$fn!($slice[theirs..], $self.data[ours..ours + rem]);
+			$fn!($self.data[ours..ours + rem], $slice[theirs..]);
 		}
 	}
 }
@@ -52,7 +53,7 @@ impl<'a, T: AsRef<[u8]>> PartialEq<T> for FieldsView<'a> {
 			return false;
 		}
 
-		macro_rules! compare {
+		macro_rules! eq {
 			($a: expr, $b: expr) => {
 				if &$a != &$b {
 					return false;
@@ -60,7 +61,7 @@ impl<'a, T: AsRef<[u8]>> PartialEq<T> for FieldsView<'a> {
 			}
 		}
 
-		on_body_slice!(self, slice, compare);
+		on_body_slice!(self, slice, eq);
 
 		true
 	}
@@ -76,8 +77,41 @@ impl<'a, 'b> PartialEq<FieldsView<'b>> for FieldsView<'a> {
 			return self.offset == other.offset;
 		}
 
-		// TODO [ToDr] Implement equality between different field views.
-		unimplemented!()
+		let mut it1 = self.iter();
+		let mut it2 = other.iter();
+
+		loop {
+			match (it1.next(), it2.next()) {
+				(Some(a), Some(b)) if a == b => {},
+				(None, None) => return true,
+				_ => return false
+			}
+		}
+	}
+}
+
+impl<'a, T: AsRef<[u8]>> PartialOrd<T> for FieldsView<'a> {
+	fn partial_cmp(&self, slice: &T) -> Option<cmp::Ordering> {
+		let slice = slice.as_ref();
+		if slice.len() != self.len {
+			return None;
+		}
+
+		macro_rules! partial_cmp {
+			($a: expr, $b: expr) => {
+				if &$a < &$b {
+					return Some(cmp::Ordering::Less);
+				}
+
+				if &$a > &$b {
+					return Some(cmp::Ordering::Greater);
+				}
+			}
+		}
+
+		on_body_slice!(self, slice, partial_cmp);
+
+		Some(cmp::Ordering::Equal)
 	}
 }
 
@@ -102,6 +136,16 @@ impl<'a> FieldsView<'a> {
 		}
 	}
 
+	/// Returns an iterator over data this `FieldsView` spans.
+	pub fn iter(&self) -> Bytes<'a> {
+		Bytes {
+			data: self.data,
+			field_body_size: self.field_body_size,
+			offset: self.offset,
+			len: self.len,
+		}
+	}
+
 	#[inline]
 	pub fn len(&self) -> usize {
 		self.len
@@ -112,7 +156,7 @@ impl<'a> FieldsView<'a> {
 
 		macro_rules! copy_to_slice {
 			($a: expr, $b: expr) => {
-				$a.copy_from_slice(&$b);
+				$b.copy_from_slice(&$a);
 			}
 		}
 
@@ -126,6 +170,37 @@ impl<'a> FieldsView<'a> {
 		let left = FieldsView::with_options(self.data, self.field_body_size, self.offset, pos);
 		let right = FieldsView::with_options(self.data, self.field_body_size, self.offset + pos, self.len - pos);
 		(left, right)
+	}
+}
+
+#[derive(Debug)]
+pub struct Bytes<'a> {
+	data: &'a [u8],
+	field_body_size: usize,
+	offset: usize,
+	len: usize,
+}
+
+impl<'a> Iterator for Bytes<'a> {
+	type Item = u8;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.len == 0 {
+			return None;
+		}
+
+		// Skip headers
+		if (self.offset - HEADER_SIZE * self.offset / self.field_body_size) % self.field_body_size == 0 {
+			self.offset += HEADER_SIZE;
+		}
+
+		let byte = self.data[self.offset];
+
+		// move forward
+		self.offset += 1;
+		self.len -= 1;
+
+		Some(byte)
 	}
 }
 
@@ -190,7 +265,7 @@ impl<'a> FieldsViewMut<'a> {
 
 		macro_rules! copy_from_slice {
 			($a: expr, $b: expr) => {
-				$b.copy_from_slice(&$a);
+				$a.copy_from_slice(&$b);
 			}
 		}
 
@@ -211,6 +286,8 @@ impl<'a> FieldsViewMut<'a> {
 
 #[cfg(test)]
 mod tests {
+	use std::cmp;
+
 	use super::FieldsView;
 
 	#[test]
@@ -325,5 +402,49 @@ mod tests {
 		assert_eq!(value, &expected_value);
 		assert_eq!(expected_key, result_key);
 		assert_eq!(expected_value, result_value);
+	}
+
+	#[test]
+	fn test_fields_view_iter() {
+		let body_size = 3;
+		let data = [0, 1, 2, 3, 0, 4, 5, 6];
+
+		let fv = FieldsView::new(&data, body_size);
+		let mut it = fv.iter();
+
+		assert_eq!(it.next(), 1.into());
+		assert_eq!(it.next(), 2.into());
+		assert_eq!(it.next(), 3.into());
+		assert_eq!(it.next(), 4.into());
+		assert_eq!(it.next(), 5.into());
+		assert_eq!(it.next(), 6.into());
+		assert_eq!(it.next(), None);
+	}
+
+	#[test]
+	fn test_fields_view_partial_eq() {
+		let body_size = 3;
+		let body_size2 = 5;
+		let data = [0, 1, 2, 3, 0, 4, 5, 6];
+		let data2 = [0, 1, 2, 3, 4, 5, 0, 6, 7];
+
+		let fv1 = FieldsView::new(&data, body_size);
+		let fv2 = FieldsView::with_options(&data2, body_size2, 0, 6);
+
+		assert_eq!(fv1, fv2);
+	}
+
+	#[test]
+	fn test_partial_cmp() {
+		let body_size = 3;
+		let data = [0, 1, 2, 3, 0, 4, 5, 6, 0, 7, 8, 9, 0, 10, 11, 12, 0, 13];
+		let fv = FieldsView::new(&data, body_size);
+
+		assert_eq!(fv.partial_cmp(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]), None);
+		assert_eq!(fv.partial_cmp(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]), Some(cmp::Ordering::Equal));
+		assert_eq!(fv.partial_cmp(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14]), Some(cmp::Ordering::Less));
+		assert_eq!(fv.partial_cmp(&[2, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]), Some(cmp::Ordering::Less));
+		assert_eq!(fv.partial_cmp(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12]), Some(cmp::Ordering::Greater));
+		assert_eq!(fv.partial_cmp(&[1, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]), Some(cmp::Ordering::Greater));
 	}
 }
