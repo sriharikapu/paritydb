@@ -13,7 +13,7 @@ use transaction::Transaction;
 
 const DB_FILE: &str = "data.db";
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Value<'a> {
 	Raw(&'a [u8]),
 	Record(Record<'a>),
@@ -33,17 +33,12 @@ impl<'a> Value<'a> {
 	}
 }
 
-// TODO [ToDr] Optimize equality
 impl<'a, T: AsRef<[u8]>> PartialEq<T> for Value<'a> {
 	fn eq(&self, other: &T) -> bool {
-		&*self.to_vec() == other.as_ref()
-	}
-}
-
-// TODO [ToDr] Optimize equality
-impl<'a, 'b> PartialEq<Value<'b>> for Value<'b> {
-	fn eq(&self, other: &Value<'b>) -> bool {
-		self.to_vec() == other.to_vec()
+		match *self {
+			Value::Raw(slice) => slice == other.as_ref(),
+			Value::Record(ref record) => record.value_is_equal(other.as_ref()),
+		}
 	}
 }
 

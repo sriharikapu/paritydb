@@ -14,7 +14,7 @@ pub enum ValueSize {
 }
 
 /// A view onto database record.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Record<'a> {
 	key: FieldsView<'a>,
 	value: FieldsView<'a>,
@@ -53,12 +53,18 @@ impl<'a> Record<'a> {
 		LittleEndian::read_u32(&data)
 	}
 
-	pub fn read_key(&self, slice: &mut [u8]) {
-		self.key.copy_to_slice(slice);
-	}
-
+	// TODO [ToDr] IMHO it would be better to get rid of those methods and expose key and value directly:
+	// record.key() == <sth>
 	pub fn key_is_equal(&self, slice: &[u8]) -> bool {
 		self.key == slice
+	}
+
+	pub fn value_is_equal(&self, slice: &[u8]) -> bool {
+		self.value == slice
+	}
+
+	pub fn read_key(&self, slice: &mut [u8]) {
+		self.key.copy_to_slice(slice);
 	}
 
 	pub fn read_value(&self, slice: &mut [u8]) {

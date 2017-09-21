@@ -45,8 +45,9 @@ pub struct FieldsView<'a> {
 	len: usize,
 }
 
-impl<'a, 'b> PartialEq<&'b [u8]> for FieldsView<'a> {
-	fn eq(&self, slice: &&'b [u8]) -> bool {
+impl<'a, T: AsRef<[u8]>> PartialEq<T> for FieldsView<'a> {
+	fn eq(&self, slice: &T) -> bool {
+		let slice = slice.as_ref();
 		if slice.len() != self.len {
 			return false;
 		}
@@ -62,6 +63,21 @@ impl<'a, 'b> PartialEq<&'b [u8]> for FieldsView<'a> {
 		on_body_slice!(self, slice, compare);
 
 		true
+	}
+}
+
+impl<'a, 'b> PartialEq<FieldsView<'b>> for FieldsView<'a> {
+	fn eq(&self, other: &FieldsView<'b>) -> bool {
+		if self.len != other.len {
+			return false;
+		}
+
+		if self.data == other.data {
+			return self.offset == other.offset;
+		}
+
+		// TODO [ToDr] Implement equality between different field views.
+		unimplemented!()
 	}
 }
 
@@ -122,9 +138,9 @@ pub struct FieldsViewMut<'a> {
 	len: usize,
 }
 
-impl<'a, 'b> PartialEq<&'b [u8]> for FieldsViewMut<'a> {
-	fn eq(&self, slice: &&'b [u8]) -> bool {
-		self.as_const() == slice
+impl<'a, T: AsRef<[u8]>> PartialEq<T> for FieldsViewMut<'a> {
+	fn eq(&self, slice: &T) -> bool {
+		self.as_const() == slice.as_ref()
 	}
 }
 
