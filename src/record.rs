@@ -74,29 +74,14 @@ impl<'a> Record<'a> {
 pub struct RecordMut<'a> {
 	key: FieldsViewMut<'a>,
 	value: FieldsViewMut<'a>,
-	current_len: usize,
-	variable_len: bool,
 }
 
 impl<'a> RecordMut<'a> {
-	pub fn new(data: &'a mut [u8], field_body_size: usize, value_size: ValueSize, key_size: usize) -> Self {
+	pub fn new(data: &'a mut [u8], field_body_size: usize, key_size: usize) -> Self {
 		let view = FieldsViewMut::new(data, field_body_size);
-		let (key, rest) = view.split_at(key_size);
+		let (key, value) = view.split_at(key_size);
 
-		match value_size {
-			ValueSize::Constant(value_size) => {
-				let (value, _) = rest.split_at(value_size);
-
-				RecordMut { key, value, current_len: value_size, variable_len: false }
-			},
-			ValueSize::Variable => {
-				let (header, rest) = rest.split_at(HEADER_SIZE);
-				let value_len = Record::read_value_len(header.as_const()) as usize;
-				let (value, _) = rest.split_at(value_len);
-
-				RecordMut { key, value, current_len: value_len, variable_len: true }
-			}
-		}
+		RecordMut { key, value }
 	}
 
 	pub fn read_key(&self, slice: &mut [u8]) {
@@ -116,16 +101,7 @@ impl<'a> RecordMut<'a> {
 	}
 
 	pub fn write_value(&mut self, slice: &[u8]) {
-		if !self.variable_len {
-			self.value.copy_from_slice(slice);
-		} else {
-			// TODO [ToDr] How is it supposed to work?
-			unimplemented!()
-		}
-	}
-
-	pub fn value_len(&self) -> usize {
-		self.current_len
+		self.value.copy_from_slice(slice);
 	}
 }
 
@@ -210,7 +186,6 @@ mod tests {
 	#[test]
 	fn test_record_mut_write() {
 		let body_size = 15;
-		let value_size = ValueSize::Constant(220);
 		let key_size = 20;
 		let mut data = [0u8; 256];
 		let key = [0x22; 20];
@@ -218,7 +193,7 @@ mod tests {
 
 		let mut written_key = [0u8; 20];
 		let mut written_value = [0u8; 220];
-		let mut record = RecordMut::new(&mut data, body_size, value_size, key_size);
+		let mut record = RecordMut::new(&mut data, body_size, key_size);
 		record.write_key(&key);
 		record.write_value(&value);
 		record.read_key(&mut written_key);
