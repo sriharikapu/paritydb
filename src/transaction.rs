@@ -1,8 +1,5 @@
 use byteorder::{LittleEndian, ByteOrder, WriteBytesExt};
 
-const OPERATION_INSERT: u8 = 0;
-const OPERATION_DELETE: u8 = 1;
-
 /// Database operations
 #[derive(Debug, PartialEq)]
 pub enum Operation<'a> {
@@ -11,6 +8,9 @@ pub enum Operation<'a> {
 }
 
 impl<'a> Operation<'a> {
+	const INSERT: u8 = 0;
+	const DELETE: u8 = 1;
+
 	/// Each operation is stored in a format which duplicates size before and
 	/// after the transaction. Thanks to that, transactions from journal can be
 	/// quickly iterated backwards.
@@ -23,21 +23,21 @@ impl<'a> Operation<'a> {
 	fn write_to_buf(&self, buf: &mut Vec<u8>) {
 		match *self {
 			Operation::Insert(key, value) => {
-				buf.push(OPERATION_INSERT);
+				buf.push(Operation::INSERT);
 				buf.write_u32::<LittleEndian>(key.len() as u32).unwrap();
 				buf.write_u32::<LittleEndian>(value.len() as u32).unwrap();
 				buf.extend_from_slice(key);
 				buf.extend_from_slice(value);
 				buf.write_u32::<LittleEndian>(key.len() as u32).unwrap();
 				buf.write_u32::<LittleEndian>(value.len() as u32).unwrap();
-				buf.push(OPERATION_INSERT);
+				buf.push(Operation::INSERT);
 			},
 			Operation::Delete(key) => {
-				buf.push(OPERATION_DELETE);
+				buf.push(Operation::DELETE);
 				buf.write_u32::<LittleEndian>(key.len() as u32).unwrap();
 				buf.extend_from_slice(key);
 				buf.write_u32::<LittleEndian>(key.len() as u32).unwrap();
-				buf.push(OPERATION_DELETE);
+				buf.push(Operation::DELETE);
 			},
 		}
 	}
@@ -110,7 +110,7 @@ impl<'a> Iterator for OperationsIterator<'a> {
 		}
 
 		match self.data[0] {
-			OPERATION_INSERT => {
+			Operation::INSERT => {
 				let key_len = LittleEndian::read_u32(&self.data[1..5]) as usize;
 				let value_len = LittleEndian::read_u32(&self.data[5..9]) as usize;
 				let key_end = 9 + key_len;
@@ -119,7 +119,7 @@ impl<'a> Iterator for OperationsIterator<'a> {
 				self.data = &self.data[value_end + 9..];
 				Some(o)
 			},
-			OPERATION_DELETE => {
+			Operation::DELETE => {
 				let key_len = LittleEndian::read_u32(&self.data[1..5]) as usize;
 				let key_end = 5 + key_len;
 				let o = Operation::Delete(&self.data[5..key_end]);
@@ -139,7 +139,7 @@ impl<'a> DoubleEndedIterator for OperationsIterator<'a> {
 
 		let last = self.data.len() - 1;
 		match self.data[last] {
-			OPERATION_INSERT => {
+			Operation::INSERT => {
 				let key_len = LittleEndian::read_u32(&self.data[last - 8..last - 4]) as usize;
 				let value_len = LittleEndian::read_u32(&self.data[last - 4..last]) as usize;
 				let key_end = last - 8 - value_len;
@@ -149,7 +149,7 @@ impl<'a> DoubleEndedIterator for OperationsIterator<'a> {
 				self.data = &self.data[..key_begin - 9];
 				Some(o)
 			},
-			OPERATION_DELETE => {
+			Operation::DELETE => {
 				let key_len = LittleEndian::read_u32(&self.data[last - 4..last]) as usize;
 				let key_end = last - 4;
 				let key_begin = key_end - key_len;
