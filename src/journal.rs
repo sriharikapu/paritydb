@@ -6,10 +6,11 @@ use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::slice;
 
-use error::{ErrorKind, Result};
-use hex_slice::AsHex;
 use memmap::{Mmap, Protection};
 use tiny_keccak::sha3_256;
+
+use error::{ErrorKind, Result};
+use hex_slice::AsHex;
 use transaction::{Transaction, OperationsIterator, Operation};
 
 const CHECKSUM_SIZE: usize = 32;
@@ -143,6 +144,17 @@ impl JournalEra {
 	/// Returns true if this Journal doesn't have any eras inside.
 	pub fn is_empty(&self) -> bool {
 		self.cache.is_empty()
+	}
+
+	/// Returns an iterator over era entries
+	pub fn iter(&self) -> OperationsIterator {
+		unsafe { OperationsIterator::new(&self.mmap.as_slice()[CHECKSUM_SIZE..]) }
+	}
+
+	/// Deletes underlying file
+	pub fn delete(self) -> Result<()> {
+		fs::remove_file(self.file)?;
+		Ok(())
 	}
 }
 

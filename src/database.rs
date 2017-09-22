@@ -7,9 +7,10 @@ use find;
 use journal::Journal;
 use key::Key;
 use memmap::{Mmap, Protection};
+use transaction::Transaction;
+use flush::Flush;
 use options::{Options, InternalOptions};
 use record::Record;
-use transaction::Transaction;
 
 const DB_FILE: &str = "data.db";
 
@@ -99,9 +100,17 @@ impl Database {
 
 		let to_flush = cmp::min(len - self.options.external.journal_eras, max);
 
-		for _era in self.journal.drain_front(to_flush) {
-			// TODO [ToDr] Apply era to the database
-			unimplemented!()
+		for era in self.journal.drain_front(to_flush) {
+			let flush = Flush::new(
+				&self.path,
+				&self.options,
+				unsafe { self.mmap.as_slice() },
+				era.iter()
+			)?;
+			era.delete()?;
+			flush.flush(unsafe { self.mmap.as_mut_slice() })?;
+			self.mmap.flush()?;
+			flush.delete()?;
 		}
 
 		Ok(())
@@ -122,7 +131,7 @@ impl Database {
 
 		let key = Key::new(key, self.options.external.key_index_bits);
 		let offset = key.prefix as usize * self.options.record_offset;
-		let data = unsafe { &self.mmap.as_slice()[offset .. ] };
+		let data = unsafe { &self.mmap.as_slice()[offset..] };
 
 		match find::find_record(data, field_body_size, value_size, key.key)? {
 			find::RecordResult::Found(record) => Ok(Some(Value::Record(record))),

@@ -80,7 +80,7 @@ pub mod database;
 pub mod error;
 pub mod field;
 pub mod find;
-pub mod insert;
+pub mod flush;
 pub mod journal;
 pub mod key;
 pub mod options;

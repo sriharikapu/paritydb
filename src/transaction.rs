@@ -1,7 +1,7 @@
 use byteorder::{LittleEndian, ByteOrder, WriteBytesExt};
 
 /// Database operations
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Operation<'a> {
 	Insert(&'a [u8], &'a [u8]),
 	Delete(&'a [u8]),
