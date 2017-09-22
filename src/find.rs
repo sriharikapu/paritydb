@@ -1,3 +1,5 @@
+use std::cmp;
+
 use field::iterator::FieldIterator;
 use field::{Error, Header, HEADER_SIZE};
 use record::{ValueSize, Record};
@@ -26,16 +28,21 @@ pub fn find_record<'a>(
 			Header::Uninitialized => return Ok(RecordResult::NotFound),
 			Header::Inserted => {
 				let offset = (field_body_size + HEADER_SIZE) * index;
-				if Record::extract_key(&data[offset..], field_body_size, key.len()) == key {
-					let record = Record::new(&data[offset..], field_body_size, value_size, key.len());
-					return Ok(RecordResult::Found(record));
+				match Record::extract_key(&data[offset..], field_body_size, key.len()).partial_cmp(&key) {
+					Some(cmp::Ordering::Less) => {},
+					Some(cmp::Ordering::Equal) => {
+						let record = Record::new(&data[offset..], field_body_size, value_size, key.len());
+						return Ok(RecordResult::Found(record));
+					},
+					_ => return Ok(RecordResult::NotFound),
 				}
 			},
 			Header::Continued => {},
 			Header::Deleted => {
 				let offset = (field_body_size + HEADER_SIZE) * index;
-				if Record::extract_key(&data[offset..], field_body_size, key.len()) == key {
-					return Ok(RecordResult::NotFound);
+				match Record::extract_key(&data[offset..], field_body_size, key.len()).partial_cmp(&key) {
+					Some(cmp::Ordering::Less) => {},
+					_ => return Ok(RecordResult::NotFound),
 				}
 			}
 		}
@@ -148,11 +155,22 @@ mod tests {
 	}
 
 	#[test]
-	fn test_find_out_of_range_record_location_for_reading() {
+	fn test_find_not_found_record_location_for_reading() {
 		let value_size = record::ValueSize::Constant(0);
 		let body_size = 3;
 		let data = [1, 1, 2, 3, 1, 4, 5, 6];
 		let key = [1, 4, 5];
+		let location = RecordResult::NotFound;
+
+		assert_eq(location, find_record(&data, body_size, value_size, &key).unwrap());
+	}
+
+	#[test]
+	fn test_find_out_of_range_record_location_for_reading() {
+		let value_size = record::ValueSize::Constant(0);
+		let body_size = 3;
+		let data = [1, 1, 2, 3, 1, 4, 5, 6];
+		let key = [4, 5, 7];
 		let location = RecordResult::OutOfRange;
 
 		assert_eq(location, find_record(&data, body_size, value_size, &key).unwrap());

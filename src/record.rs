@@ -59,6 +59,10 @@ impl<'a> Record<'a> {
 		self.key == slice
 	}
 
+	pub fn key_is_greater(&self, slice: &[u8]) -> bool {
+		self.key > slice
+	}
+
 	pub fn value_is_equal(&self, slice: &[u8]) -> bool {
 		self.value == slice
 	}
