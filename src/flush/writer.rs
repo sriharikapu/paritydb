@@ -35,6 +35,36 @@ impl<'a> DeleteOperation<'a> {
 	}
 }
 
+#[derive(Debug, PartialEq, Default)]
+struct OperationBuffer {
+	inner: Vec<u8>,
+	denoted_operation_start: Option<usize>,
+}
+
+impl OperationBuffer {
+	#[inline]
+	fn as_raw_mut(&mut self) -> &mut Vec<u8> {
+		&mut self.inner
+	}
+
+	#[inline]
+	fn denote_operation_start(&mut self, offset: u64) {
+		assert!(self.denoted_operation_start.is_none(), "OperationWriter entered incorrect state");
+		self.denoted_operation_start = Some(self.inner.len());
+		self.inner.write_u64::<LittleEndian>(offset).unwrap();
+		// reserve space for len
+		self.inner.extend_from_slice(&[0; 4]);
+	}
+
+	#[inline]
+	fn finish_operation(&mut self) {
+		if let Some(operation_start) = self.denoted_operation_start.take() {
+			let len = self.inner.len() - (operation_start + 12);
+			LittleEndian::write_u32(&mut self.inner[operation_start + 8..operation_start + 12], len as u32);
+		}
+	}
+}
+
 enum OperationWriterState<'op, 'db> {
 	ConsumeNextOperation,
 	InsertOperation(InsertOperation<'op>, usize),
@@ -56,8 +86,7 @@ pub struct OperationWriter<'op, 'db, I: Iterator> {
 	state: OperationWriterState<'op, 'db>,
 	operations: Peekable<I>,
 	spaces: SpaceIterator<'db>,
-	buffer: Vec<u8>,
-	previous_operation_start: Option<usize>,
+	buffer: OperationBuffer,
 	field_body_size: usize,
 	prefix_bits: u8,
 	const_value: bool,
@@ -70,8 +99,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 			state: OperationWriterState::ConsumeNextOperation,
 			operations: operations.peekable(),
 			spaces: SpaceIterator::new(database, field_body_size, 0),
-			buffer: Vec::new(),
-			previous_operation_start: None,
+			buffer: OperationBuffer::default(),
 			field_body_size,
 			prefix_bits,
 			const_value,
@@ -82,10 +110,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 		let next_state = match self.state {
 			OperationWriterState::ConsumeNextOperation => {
 				// write the len of previous operation
-				if let Some(operation_start) = self.previous_operation_start {
-					let len = self.buffer.len() - (operation_start + 12);
-					LittleEndian::write_u32(&mut self.buffer[operation_start + 8..operation_start + 12], len as u32);
-				}
+				self.buffer.finish_operation();
 
 				// get next operation
 				match self.operations.next() {
@@ -98,10 +123,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 								let k = Key::new(key, self.prefix_bits);
 								self.spaces.move_offset_forward(k.offset(self.field_body_size));
 
-								let space = self.spaces.peek()
-									.expect("TODO: db, end0")
-									.as_ref().expect("TODO: malformed DB")
-									.clone();
+								let space = self.spaces.peek().expect("TODO: db end")?;
 
 								match space {
 									Space::Empty(ref space) => {
@@ -129,10 +151,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 							};
 
 							// write previous operation start
-							self.previous_operation_start = Some(self.buffer.len());
-							self.buffer.write_u64::<LittleEndian>(offset as u64).unwrap();
-							// reserve space for len
-							self.buffer.extend_from_slice(&[0; 4]);
+							self.buffer.denote_operation_start(offset as u64);
 
 							let insert = InsertOperation {
 								key,
@@ -156,14 +175,14 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 			},
 			OperationWriterState::InsertOperation(ref operation, len) => {
 				// write next operation to a buffer
-				let written = operation.write(&mut self.buffer, self.field_body_size, self.const_value);
+				let written = operation.write(self.buffer.as_raw_mut(), self.field_body_size, self.const_value);
 				// increase the len size by operation size
 				// advance to the next operation
 				OperationWriterState::Advance(len + written)
 			},
 			OperationWriterState::OverwriteOperation(ref operation, len) => {
 				// write overwrite operation to a buffer
-				let _ = operation.write(&mut self.buffer, self.field_body_size, self.const_value);
+				let _ = operation.write(self.buffer.as_raw_mut(), self.field_body_size, self.const_value);
 				// len should not be increased
 				// advance to the next operation
 				OperationWriterState::Advance(len)
@@ -176,10 +195,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 			},
 			OperationWriterState::Advance(len) => {
 				// peek next space and operation and decide which one should go first
-				let space = self.spaces.peek()
-					.expect("TODO: db, end1")
-					.as_ref().expect("TODO: malformed DB")
-					.clone();
+				let space = self.spaces.peek().expect("TODO: db end")?;
 
 				if len == 0 {
 					OperationWriterState::ConsumeNextOperation
@@ -240,7 +256,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 			},
 			OperationWriterState::OccupiedSpace(ref mut space, len) => {
 				// write it to a buffer
-				self.buffer.extend_from_slice(space.data);
+				self.buffer.as_raw_mut().extend_from_slice(space.data);
 				// advance to the next operation
 				OperationWriterState::Advance(len)
 			},
@@ -256,6 +272,6 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 	#[inline]
 	pub fn run(mut self) -> Result<Vec<u8>> {
 		while let OperationWriterStep::Stepped = self.step()? {}
-		Ok(self.buffer)
+		Ok(self.buffer.inner)
 	}
 }

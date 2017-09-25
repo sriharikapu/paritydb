@@ -37,7 +37,6 @@ pub struct SpaceIterator<'a> {
 	data: &'a [u8],
 	field_body_size: usize,
 	offset: usize,
-	peeked: Option<Result<Space<'a>>>,
 }
 
 impl<'a> SpaceIterator<'a> {
@@ -46,7 +45,6 @@ impl<'a> SpaceIterator<'a> {
 			data,
 			field_body_size,
 			offset,
-			peeked: None,
 		}
 	}
 
@@ -54,17 +52,17 @@ impl<'a> SpaceIterator<'a> {
 	pub fn move_offset_forward(&mut self, offset: usize) {
 		if offset > self.offset {
 			self.offset = offset;
-			self.peeked = None;
 		}
 	}
 
 	/// Peek next value
-	pub fn peek(&mut self) -> Option<&Result<Space<'a>>> {
-		if self.peeked.is_none() {
-			self.peeked = self.next();
-		}
-
-		self.peeked.as_ref()
+	pub fn peek(&mut self) -> Option<Result<Space<'a>>> {
+		// save offset
+		let offset = self.offset;
+		let next = self.next();
+		// move back
+		self.offset = offset;
+		next
 	}
 }
 
@@ -72,10 +70,6 @@ impl<'a> Iterator for SpaceIterator<'a> {
 	type Item = Result<Space<'a>>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		if let Some(peeked) = self.peeked.take() {
-			return Some(peeked)
-		}
-
 		if self.data[self.offset..].is_empty() {
 			return None;
 		}
