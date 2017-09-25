@@ -22,6 +22,14 @@ impl ValuesLen {
 			ValuesLen::Variable { .. } => record::ValueSize::Variable,
 		}
 	}
+
+	#[inline]
+	pub(crate) fn is_const(&self) -> bool {
+		match *self {
+			ValuesLen::Constant(_) => true,
+			ValuesLen::Variable { .. } => false,
+		}
+	}
 }
 
 #[derive(Debug, PartialEq)]
@@ -51,18 +59,8 @@ impl Default for Options {
 	}
 }
 
-impl Options {
-	pub fn with<F>(f: F) -> Self where
-		F: FnOnce(&mut Self),
-	{
-		let mut options = Options::default();
-		f(&mut options);
-		options
-	}
-}
-
 #[derive(Debug, PartialEq)]
-pub(crate) struct InternalOptions {
+pub struct InternalOptions {
 	pub external: Options,
 	pub value_size: record::ValueSize,
 	pub field_body_size: usize,
@@ -105,5 +103,16 @@ impl InternalOptions {
 			initial_db_size,
 			record_offset,
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::ValuesLen;
+
+	#[test]
+	fn test_values_len_const() {
+		assert_eq!(true, ValuesLen::Constant(1).is_const());
+		assert_eq!(false, ValuesLen::Variable { average: 5 }.is_const());
 	}
 }

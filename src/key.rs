@@ -1,3 +1,5 @@
+use field;
+
 pub struct Key<'a> {
 	pub key: &'a [u8],
 	pub prefix: u32,
@@ -10,6 +12,10 @@ impl<'a> Key<'a> {
 			key,
 			prefix,
 		}
+	}
+
+	pub fn offset(&self, field_body_size: usize) -> usize {
+		self.prefix as usize * field::field_size(field_body_size)
 	}
 
 	fn read_prefix(key: &'a [u8], prefix_bits: u8) -> u32 {

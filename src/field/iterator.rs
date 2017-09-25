@@ -1,4 +1,5 @@
 use field::error::{Error, ErrorKind};
+use field::field_size;
 use field::header::{Header, HEADER_SIZE};
 
 pub struct Field<'a> {
@@ -42,18 +43,19 @@ impl<'a> Field<'a> {
 #[derive(Clone)]
 pub struct FieldIterator<'a> {
 	data: &'a [u8],
-	field_body_size: usize,
+	field_size: usize,
 }
 
 impl<'a> FieldIterator<'a> {
 	pub fn new(data: &'a [u8], field_body_size: usize) -> Result<Self, Error> {
-		if (data.len() % (field_body_size + HEADER_SIZE)) != 0 {
+		let field_size = field_size(field_body_size);
+		if (data.len() % field_size) != 0 {
 			return Err(ErrorKind::InvalidLength.into());
 		}
 
 		Ok(FieldIterator {
 			data,
-			field_body_size,
+			field_size,
 		})
 	}
 }
@@ -66,7 +68,7 @@ impl<'a> Iterator for FieldIterator<'a> {
 			return None;
 		}
 
-		let (next_field, new_data) = self.data.split_at(self.field_body_size + HEADER_SIZE);
+		let (next_field, new_data) = self.data.split_at(self.field_size);
 		self.data = new_data;
 		Some(next_field.into())
 	}

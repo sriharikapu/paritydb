@@ -21,8 +21,12 @@ error_chain! {
 			description("Invalid key length")
 			display("Invalid key length. Expected: {}, got: {}", expected, got),
 		}
+		CorruptedFlush(path: PathBuf, msg: String) {
+			description("Hash of flush data is invalid"),
+			display("Database flush corruption detected in file at {}. {}", path.display(), msg),
+		}
 		CorruptedJournal(path: PathBuf, msg: String) {
-			description("Hash of data is invalid"),
+			description("Hash of journal data is invalid"),
 			display("Database journal corruption detected in file at {}. {}", path.display(), msg),
 		}
 		InvalidJournalLocation(path: PathBuf) {

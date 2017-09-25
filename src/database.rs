@@ -108,7 +108,7 @@ impl Database {
 				era.iter()
 			)?;
 			era.delete()?;
-			flush.flush(unsafe { self.mmap.as_mut_slice() })?;
+			flush.flush(unsafe { self.mmap.as_mut_slice() });
 			self.mmap.flush()?;
 			flush.delete()?;
 		}
@@ -141,7 +141,6 @@ impl Database {
 	}
 }
 
-
 #[cfg(test)]
 mod tests {
 	extern crate tempdir;
@@ -154,10 +153,11 @@ mod tests {
 	fn create_insert_and_query() {
 		let temp = tempdir::TempDir::new("create_insert_and_query").unwrap();
 
-		let mut db = Database::create(temp.path(), Options::with(|mut options| {
-			options.journal_eras = 0;
-			options.key_len = 3;
-		})).unwrap();
+		let mut db = Database::create(temp.path(), Options {
+			journal_eras: 0,
+			key_len: 3,
+			..Default::default()
+		}).unwrap();
 
 		let mut tx = Transaction::default();
 		tx.insert("abc", "xyz");
@@ -189,10 +189,11 @@ mod tests {
 	fn should_validate_key_length() {
 		let temp = tempdir::TempDir::new("create_insert_and_query").unwrap();
 
-		let db = Database::create(temp.path(), Options::with(|mut options| {
-			options.journal_eras = 0;
-			options.key_len = 3;
-		})).unwrap();
+		let mut db = Database::create(temp.path(), Options {
+			journal_eras: 0,
+			key_len: 3,
+			..Default::default()
+		}).unwrap();
 
 		assert_eq!(*db.get("a").unwrap_err().kind(), ErrorKind::InvalidKeyLen(3, 1));
 	}

@@ -6,11 +6,11 @@ use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::slice;
 
+use hex_slice::AsHex;
 use memmap::{Mmap, Protection};
 use tiny_keccak::sha3_256;
 
 use error::{ErrorKind, Result};
-use hex_slice::AsHex;
 use transaction::{Transaction, OperationsIterator, Operation};
 
 const CHECKSUM_SIZE: usize = 32;
@@ -103,7 +103,7 @@ impl JournalEra {
 			let checksum = unsafe { &mmap.as_slice()[..CHECKSUM_SIZE] };
 			let data = unsafe { &mmap.as_slice()[CHECKSUM_SIZE..] };
 			let hash = sha3_256(data);
-			if  hash != checksum {
+			if hash != checksum {
 				return Err(ErrorKind::CorruptedJournal(
 					file.as_ref().into(),
 					format!(

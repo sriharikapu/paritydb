@@ -1,6 +1,7 @@
 use std::{cmp, slice};
 
 use field::header::HEADER_SIZE;
+use field::field_size;
 
 macro_rules! on_body_slice {
 	($self:expr, $slice:expr, $fn:ident) => {
@@ -122,7 +123,7 @@ impl<'a> FieldsView<'a> {
 			data,
 			field_body_size,
 			offset: 0,
-			len: data.len() * field_body_size / (field_body_size + HEADER_SIZE),
+			len: data.len() * field_body_size / field_size(field_body_size),
 		}
 	}
 
@@ -201,86 +202,6 @@ impl<'a> Iterator for Bytes<'a> {
 		self.len -= 1;
 
 		Some(byte)
-	}
-}
-
-/// A mutable view onto multiple consecutive fields
-#[derive(Debug)]
-pub struct FieldsViewMut<'a> {
-	data: &'a mut [u8],
-	field_body_size: usize,
-	offset: usize,
-	len: usize,
-}
-
-impl<'a, T: AsRef<[u8]>> PartialEq<T> for FieldsViewMut<'a> {
-	fn eq(&self, slice: &T) -> bool {
-		self.as_const() == slice.as_ref()
-	}
-}
-
-impl<'a> FieldsViewMut<'a> {
-	/// Creates new `FieldsViewMut` with no offset
-	pub fn new(data: &'a mut [u8], field_body_size: usize) -> Self {
-		FieldsViewMut {
-			len: data.len() * field_body_size / (field_body_size + HEADER_SIZE),
-			data,
-			field_body_size,
-			offset: 0,
-		}
-	}
-
-	/// Create new `FieldsView` with an offset. Usefull, when reading record body.
-	pub fn with_options(data: &'a mut [u8], field_body_size: usize, offset: usize, len: usize) -> Self {
-		FieldsViewMut {
-			data,
-			field_body_size,
-			offset,
-			len,
-		}
-	}
-
-	#[inline]
-	pub fn len(&self) -> usize {
-		self.len
-	}
-
-	#[inline]
-	pub fn as_const(&self) -> FieldsView {
-		FieldsView {
-			data: self.data,
-			field_body_size: self.field_body_size,
-			offset: self.offset,
-			len: self.len,
-		}
-	}
-
-	#[inline]
-	pub fn copy_to_slice(&self, slice: &mut [u8]) {
-		self.as_const().copy_to_slice(slice);
-	}
-
-	pub fn copy_from_slice(&mut self, slice: &[u8]) {
-		assert_eq!(self.len, slice.len(), "slice must have the same size");
-
-		macro_rules! copy_from_slice {
-			($a: expr, $b: expr) => {
-				$a.copy_from_slice(&$b);
-			}
-		}
-
-		on_body_slice!(self, slice, copy_from_slice);
-	}
-
-	pub fn split_at(self, pos: usize) -> (Self, Self) {
-		assert!(self.len >= pos, "Cannot split beyond FieldsView length: {} < {} ", self.len, pos);
-		assert!(self.data.len() >= self.offset + pos, "Cannot split beyond data length: {} < {}", self.data.len(), self.offset + pos);
-		// TODO: left and right part of FieldsViewMut should never access the counterpart, but it would
-		// be safer to guarantee that without using unsafe code. It can be done entirely with `slice::split_at_mut`.
-		let copied_data = unsafe { slice::from_raw_parts_mut(self.data.as_mut_ptr(), self.data.len()) };
-		let left = FieldsViewMut::with_options(copied_data, self.field_body_size, self.offset, pos);
-		let right = FieldsViewMut::with_options(self.data, self.field_body_size, self.offset + pos, self.len - pos);
-		(left, right)
 	}
 }
 
