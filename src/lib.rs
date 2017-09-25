@@ -1,6 +1,6 @@
 //! Custom database for ethereum accounts
 //!
-//! Assumptions:
+//! ### Assumptions:
 //!
 //! - key-value database
 //!
@@ -12,32 +12,28 @@
 //!
 //! - guaranteed ACID (atomicity, consistency, isolation and durability)
 //!
-//! Each record is stored in database as a header and body.
+//! - constant size keys
+//!
+//! - optimized for constant size values
+//!
+//! - support for variadic size values
+//!
+//! ### Record:
+//!
+//! Each record is stored in a database in a binary format.
 //!
 //! ```text
-//!  header    body
-//!   /         /
-//! |...|...........|
+//!  key   value_len (optional)  value
+//!   /    /                      /
+//! |...|...|......................|
 //! ```
 //!
-//! A header's length is either 0 or 4 bytes.
-//!
-//! ```text
-//!  operation  body_length (optional)
-//!   /          /
-//! |...|...........|
-//! ```
-//!
-//! A body fields always consists of the key and the value
-//!
-//! ```text
-//!  key      value
-//!   /         /
-//! |...|...........|
-//! ```
+//! ### Field:
 //!
 //! The database consist of array of contant-size fields.
 //! Record might be stored in one or more consecutive fields.
+//! Databases with constant size records will store a full record
+//! in a single field.
 //!
 //! ```text
 //!  record_x            record_o
@@ -46,13 +42,15 @@
 //!  1234 1235 1236 1237 1238 1239
 //! ```
 //!
-//! Each field also has it's header and body.
+//! Each field consists of header and body.
 //!
 //! ```text
 //!  header    body
 //!   /         /
 //! |...|...........|
 //! ```
+//!
+//! ### Field header:
 //!
 //! A header is always a single byte which identicates what the body is.
 //!
