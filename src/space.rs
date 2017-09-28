@@ -27,6 +27,12 @@ pub struct EmptySpace {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct DeletedSpace<'a> {
+	pub offset: usize,
+	pub data: &'a [u8],
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum Space<'a> {
 	Occupied(OccupiedSpace<'a>),
 	Empty(EmptySpace),

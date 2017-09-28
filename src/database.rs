@@ -221,10 +221,10 @@ mod tests {
 
 		// Flush journal and fetch everything from DB.
 		// TODO [ToDr] Uncomment me.
-		// db.flush_journal(2).unwrap();
+		//db.flush_journal(2).unwrap();
 
-		// assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
-		// assert_eq!(db.get("cde").unwrap(), None);
+		//assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
+		//assert_eq!(db.get("cde").unwrap(), None);
 	}
 
 	#[test]

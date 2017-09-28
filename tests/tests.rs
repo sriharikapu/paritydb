@@ -39,8 +39,12 @@ fn test_database_flush() {
 
 	let mut tx = Transaction::default();
 	tx.insert("abd", "005");
+	tx.delete("cde");
+	tx.delete("abc");
 	db.commit(&tx).unwrap();
 	db.flush_journal(1).unwrap();
 
 	assert_eq!(db.get("abd").unwrap().unwrap(), b"005");
+	assert_eq!(db.get("abc").unwrap(), None);
+	assert_eq!(db.get("cde").unwrap(), None);
 }

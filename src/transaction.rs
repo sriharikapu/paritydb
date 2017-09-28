@@ -1,15 +1,34 @@
+use std::cmp::Ordering;
 use byteorder::{LittleEndian, ByteOrder, WriteBytesExt};
 
 /// Database operations
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Operation<'a> {
 	Insert(&'a [u8], &'a [u8]),
 	Delete(&'a [u8]),
 }
 
+impl<'a> PartialOrd for Operation<'a> {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		self.key().partial_cmp(other.key())
+	}
+}
+
+impl<'a> Ord for Operation<'a> {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.key().cmp(other.key())
+	}
+}
+
 impl<'a> Operation<'a> {
 	const INSERT: u8 = 0;
 	const DELETE: u8 = 1;
+
+	fn key(&self) -> &'a [u8] {
+		match *self {
+			Operation::Insert(key, _) | Operation::Delete(key) => key,
+		}
+	}
 
 	/// Each operation is stored in a format which duplicates size before and
 	/// after the transaction. Thanks to that, transactions from journal can be

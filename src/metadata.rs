@@ -37,7 +37,9 @@ impl Metadata {
 	/// Notify that record was removed.
 	pub fn remove_record(&mut self, prefix: u32, len: usize) {
 		self.occupied_bytes -= len as u64;
-		self.prefixes.remove(prefix);
+		// TODO: we can't simply remove prefix from db, cause there might be
+		// more records with the same prefix in the database
+		//self.prefixes.remove(prefix);
 	}
 
 	/// Notify that record was overwritten.

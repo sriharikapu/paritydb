@@ -13,30 +13,57 @@ use space::{SpaceIterator, Space, EmptySpace, OccupiedSpace};
 use transaction::Operation;
 
 struct InsertOperation<'a> {
+	/// Key of the record which needs to be inserted
 	key: Key<'a>,
+	/// Value of the record which needs to be inserted
 	value: &'a [u8],
 }
 
 impl<'a> InsertOperation<'a> {
+	/// Returns operation length
 	fn write(&self, buffer: &mut Vec<u8>, field_body_size: usize, const_value: bool) -> usize {
 		let buffer_len = buffer.len();
 		append_record(buffer, self.key.key, self.value, field_body_size, const_value);
 		buffer.len() - buffer_len
 	}
+}
 
-	fn len(&self) -> usize {
-		self.key.key.len() + self.value.len()
+struct OverwriteOperation<'a> {
+	/// Key of the record which needs to be inserted
+	key: Key<'a>,
+	/// Value of the record which needs to be inserted
+	value: &'a [u8],
+	/// Length of the record which needs to be overwritten
+	old_len: usize,
+}
+
+impl<'a> OverwriteOperation<'a> {
+	/// Returns operation length
+	fn write(&self, buffer: &mut Vec<u8>, field_body_size: usize, const_value: bool) -> usize {
+		let buffer_len = buffer.len();
+		append_record(buffer, self.key.key, self.value, field_body_size, const_value);
+		let written = buffer.len() - buffer_len;
+		if self.old_len > written {
+			let new_len = buffer.len() + self.old_len - written;
+			buffer.resize(new_len, 3);
+		}
+		buffer.len() - buffer_len
 	}
 }
 
 struct DeleteOperation<'a> {
+	/// Key of the record which needs to be deleted
 	key: Key<'a>,
+	/// Length of the record which needs to be deleted
 	len: usize,
 }
 
 impl<'a> DeleteOperation<'a> {
-	fn write(&self, buffer: &mut Vec<u8>, field_body_size: usize) -> usize {
-		unimplemented!();
+	/// Returns operation length
+	fn write(&self, buffer: &mut Vec<u8>) -> usize {
+		let buffer_len = buffer.len();
+		buffer.resize(buffer_len + self.len, 3);
+		self.len
 	}
 }
 
@@ -73,7 +100,7 @@ impl OperationBuffer {
 enum OperationWriterState<'op, 'db> {
 	ConsumeNextOperation,
 	InsertOperation(InsertOperation<'op>, usize),
-	OverwriteOperation(InsertOperation<'op>, usize, usize),
+	OverwriteOperation(OverwriteOperation<'op>, usize),
 	DeleteOperation(DeleteOperation<'op>, usize),
 	Advance(usize),
 	EmptySpace(EmptySpace, usize),
@@ -133,6 +160,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 					Some(operation) => match operation {
 						// if it's insert, peek and move to space offset until you find insertion place
 						Operation::Insert(k, value) => {
+							println!("insert operation: {:?}", k);
 							let key = Key::new(k, self.prefix_bits);
 							self.spaces.move_offset_forward(key.offset(self.field_body_size));
 
@@ -152,9 +180,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 											cmp::Ordering::Equal => {
 												// overwrite
 												let _ = self.spaces.next();
-												// TODO: handle edge case when new record len != old record len
-												let previous_len = k.len() + value.len();
-												break (space.offset, Some(previous_len));
+												break (space.offset, Some(space.data.len()));
 											},
 											cmp::Ordering::Greater => {
 												// insert then write old record
@@ -165,25 +191,67 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 								}
 							};
 
-							// write previous operation start
+							// denote operation start
 							self.buffer.denote_operation_start(offset as u64);
-
-							let insert = InsertOperation {
-								key,
-								value,
-							};
 
 							// call insert operation
 							if let Some(size) = previous_size {
-								OperationWriterState::OverwriteOperation(insert, size, 0)
+								let overwrite = OverwriteOperation {
+									key,
+									value,
+									old_len: size,
+								};
+								OperationWriterState::OverwriteOperation(overwrite, 0)
 							} else {
+								let insert = InsertOperation {
+									key,
+									value,
+								};
 								OperationWriterState::InsertOperation(insert, 0)
 							}
 						},
-						Operation::Delete(key) => {
+						Operation::Delete(k) => {
 							// if it's delete peek and move to delete place
 							// if not found, move to next operation
-							unimplemented!();
+							let key = Key::new(k, self.prefix_bits);
+							self.spaces.move_offset_forward(key.offset(self.field_body_size));
+
+							let next_state = loop {
+								let space = self.spaces.peek().expect("TODO: db end")?;
+
+								println!("key to delete: {:?}", k);
+								println!("key offset: {:?}", key.offset(self.field_body_size));
+								println!("space to delete: {:?}", space);
+								match space {
+									Space::Empty(_) => {
+										// not found
+										break OperationWriterState::ConsumeNextOperation;
+									},
+									Space::Occupied(ref space) => {
+										match Record::extract_key(&space.data, self.field_body_size, k.len()).partial_cmp(&k).unwrap() {
+											cmp::Ordering::Less => {
+												// seek
+												let _ = self.spaces.next();
+											},
+											cmp::Ordering::Equal => {
+												let _ = self.spaces.next();
+
+												self.buffer.denote_operation_start(space.offset as u64);
+												break OperationWriterState::DeleteOperation(DeleteOperation {
+													key,
+													len: space.data.len(),
+												}, 0)
+											},
+											cmp::Ordering::Greater => {
+												// not found
+												break OperationWriterState::ConsumeNextOperation;
+											}
+										}
+									},
+								}
+							};
+
+							next_state
 						},
 					}
 				}
@@ -192,22 +260,24 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 				// write next operation to a buffer
 				let written = operation.write(self.buffer.as_raw_mut(), self.field_body_size, self.const_value);
 				// update metadata
-				self.metadata.insert_record(operation.key.prefix, operation.len());
+				self.metadata.insert_record(operation.key.prefix, written);
 				// increase the len size by operation size
 				// advance to the next operation
 				OperationWriterState::Advance(len + written)
 			},
-			OperationWriterState::OverwriteOperation(ref operation, previous_size, len) => {
+			OperationWriterState::OverwriteOperation(ref operation, len) => {
 				// write overwrite operation to a buffer
-				let _ = operation.write(self.buffer.as_raw_mut(), self.field_body_size, self.const_value);
+				let written = operation.write(self.buffer.as_raw_mut(), self.field_body_size, self.const_value);
+				assert!(written >= operation.old_len, "old record has not been overwritten");
 				// update metadata
-				self.metadata.update_record_len(previous_size, operation.len());
+				self.metadata.update_record_len(operation.old_len, written);
 				// len should not be increased
 				// advance to the next operation
-				OperationWriterState::Advance(len)
+				OperationWriterState::Advance(len + written - operation.old_len)
 			},
 			OperationWriterState::DeleteOperation(ref operation, len) => {
 				// write to buffer deleted fields
+				let _ = operation.write(self.buffer.as_raw_mut());
 
 				// update metadata
 				self.metadata.remove_record(operation.key.prefix, operation.len);
@@ -240,7 +310,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 								match Record::extract_key(&space.data, self.field_body_size, key.key.len()).partial_cmp(&key.key).unwrap() {
 									// existing record is smaller
 									cmp::Ordering::Less => {
-										// remove his space
+										// rewrite this space
 										let _ = self.spaces.next();
 										OperationWriterState::OccupiedSpace(space, len)
 									}
@@ -248,13 +318,12 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 									cmp::Ordering::Equal => {
 										let _ = self.spaces.next();
 										let _ = self.operations.next();
-										let insert = InsertOperation {
+										let overwrite = OverwriteOperation {
 											key,
 											value,
+											old_len: space.data.len(),
 										};
-										// TODO: handle edge case when new record len != old record len
-										let previous_len = insert.len();
-										OperationWriterState::OverwriteOperation(insert, previous_len, len)
+										OperationWriterState::OverwriteOperation(overwrite, len)
 									},
 									// existing record is greater, insert new record first
 									cmp::Ordering::Greater => {
@@ -268,8 +337,29 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 								}
 							},
 							Some(Operation::Delete(ref key)) => {
-								// TODO: if delete operation call delete
-								unimplemented!();
+								let key = Key::new(key, self.prefix_bits);
+								match Record::extract_key(&space.data, self.field_body_size, key.key.len()).partial_cmp(&key.key).unwrap() {
+									cmp::Ordering::Less => {
+										// rewrite this space
+										let _ = self.spaces.next();
+										OperationWriterState::OccupiedSpace(space, len)
+									},
+									cmp::Ordering::Equal => {
+										let _ = self.spaces.next();
+										let _ = self.operations.next();
+										let delete = DeleteOperation {
+											key,
+											len: space.data.len(),
+										};
+										OperationWriterState::DeleteOperation(delete, len)
+									},
+									cmp::Ordering::Greater => {
+										// nothing to delete
+										let _ = self.operations.next();
+										// check next operation
+										OperationWriterState::Advance(len)
+									},
+								}
 							},
 						}
 					}

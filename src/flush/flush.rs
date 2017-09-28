@@ -104,15 +104,21 @@ impl Flush {
 	pub fn flush(&self, db: &mut [u8], raw_metadata: &mut [u8], metadata: &mut Metadata) {
 		let meta_offset = self.mmap.len() - metadata::bytes::len(self.prefix_bits);
 		let operations = unsafe { &self.mmap.as_slice()[Self::CHECKSUM_SIZE..meta_offset] };
+		println!("flush start");
+		println!("operations: {:?}", operations);
 		let operations = IdempotentOperationIterator::new(operations);
 
 		for o in operations {
+			println!("o: {:?}", o);
 			db[o.offset..o.offset + o.data.len()].copy_from_slice(o.data);
 		}
 
 		let meta = unsafe { &self.mmap.as_slice()[meta_offset..] };
 		raw_metadata.copy_from_slice(meta);
 		mem::swap(&mut self.metadata.clone(), metadata);
+
+		println!("\n\n");
+		println!("db: {:?}", db);
 	}
 
 	/// Delete flush file. Should be called only after database has been successfully flushed.

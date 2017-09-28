@@ -1,5 +1,5 @@
 use std::collections::vec_deque::Drain;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque, btree_set};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
@@ -147,8 +147,10 @@ impl JournalEra {
 	}
 
 	/// Returns an iterator over era entries
-	pub fn iter(&self) -> OperationsIterator {
+	pub fn iter(&self) -> btree_set::IntoIter<Operation> {
 		unsafe { OperationsIterator::new(&self.mmap.as_slice()[CHECKSUM_SIZE..]) }
+			.collect::<BTreeSet<_>>()
+			.into_iter()
 	}
 
 	/// Deletes underlying file
