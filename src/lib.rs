@@ -67,6 +67,9 @@
 //! If the field is already occupied we iterate over next fields until we find an empty one,
 //! which has enough consecutive fields to store the record.
 
+#![warn(missing_docs)]
+
+extern crate bit_vec;
 extern crate byteorder;
 #[macro_use]
 extern crate error_chain;
@@ -83,7 +86,9 @@ mod find;
 mod flush;
 mod journal;
 mod key;
+mod metadata;
 mod options;
+mod prefix_tree;
 mod record;
 mod space;
 mod transaction;

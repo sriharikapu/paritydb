@@ -1,32 +1,37 @@
 //! Flush operations writer
 
 use std::cmp;
-use std::io::Write;
 use std::iter::Peekable;
 
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 use error::Result;
 use key::Key;
+use metadata::Metadata;
 use record::{append_record, Record};
 use space::{SpaceIterator, Space, EmptySpace, OccupiedSpace};
 use transaction::Operation;
 
 struct InsertOperation<'a> {
-	key: &'a [u8],
+	key: Key<'a>,
 	value: &'a [u8],
 }
 
 impl<'a> InsertOperation<'a> {
 	fn write(&self, buffer: &mut Vec<u8>, field_body_size: usize, const_value: bool) -> usize {
 		let buffer_len = buffer.len();
-		append_record(buffer, self.key, self.value, field_body_size, const_value);
+		append_record(buffer, self.key.key, self.value, field_body_size, const_value);
 		buffer.len() - buffer_len
+	}
+
+	fn len(&self) -> usize {
+		self.key.key.len() + self.value.len()
 	}
 }
 
 struct DeleteOperation<'a> {
-	key: &'a [u8],
+	key: Key<'a>,
+	len: usize,
 }
 
 impl<'a> DeleteOperation<'a> {
@@ -68,7 +73,7 @@ impl OperationBuffer {
 enum OperationWriterState<'op, 'db> {
 	ConsumeNextOperation,
 	InsertOperation(InsertOperation<'op>, usize),
-	OverwriteOperation(InsertOperation<'op>, usize),
+	OverwriteOperation(InsertOperation<'op>, usize, usize),
 	DeleteOperation(DeleteOperation<'op>, usize),
 	Advance(usize),
 	EmptySpace(EmptySpace, usize),
@@ -86,6 +91,7 @@ pub struct OperationWriter<'op, 'db, I: Iterator> {
 	state: OperationWriterState<'op, 'db>,
 	operations: Peekable<I>,
 	spaces: SpaceIterator<'db>,
+	metadata: &'db mut Metadata,
 	buffer: OperationBuffer,
 	field_body_size: usize,
 	prefix_bits: u8,
@@ -94,11 +100,19 @@ pub struct OperationWriter<'op, 'db, I: Iterator> {
 
 impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> {
 	/// Creates new operations writer. All operations needs to be ordered by key.
-	pub fn new(operations: I, database: &'db [u8], field_body_size: usize, prefix_bits: u8, const_value: bool) -> Self {
+	pub fn new(
+		operations: I,
+		database: &'db [u8],
+		metadata: &'db mut Metadata,
+		field_body_size: usize,
+		prefix_bits: u8,
+		const_value: bool,
+	) -> Self {
 		OperationWriter {
 			state: OperationWriterState::ConsumeNextOperation,
 			operations: operations.peekable(),
 			spaces: SpaceIterator::new(database, field_body_size, 0),
+			metadata,
 			buffer: OperationBuffer::default(),
 			field_body_size,
 			prefix_bits,
@@ -118,19 +132,19 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 					None => OperationWriterState::Finished,
 					Some(operation) => match operation {
 						// if it's insert, peek and move to space offset until you find insertion place
-						Operation::Insert(key, value) => {
-							let (offset, overwrite) = loop {
-								let k = Key::new(key, self.prefix_bits);
-								self.spaces.move_offset_forward(k.offset(self.field_body_size));
+						Operation::Insert(k, value) => {
+							let key = Key::new(k, self.prefix_bits);
+							self.spaces.move_offset_forward(key.offset(self.field_body_size));
 
+							let (offset, previous_size) = loop {
 								let space = self.spaces.peek().expect("TODO: db end")?;
 
 								match space {
 									Space::Empty(ref space) => {
-										break (space.offset, false);
+										break (space.offset, None);
 									},
 									Space::Occupied(ref space) => {
-										match Record::extract_key(&space.data, self.field_body_size, key.len()).partial_cmp(&key).unwrap() {
+										match Record::extract_key(&space.data, self.field_body_size, k.len()).partial_cmp(&k).unwrap() {
 											cmp::Ordering::Less => {
 												// seek
 												let _ = self.spaces.next();
@@ -139,11 +153,12 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 												// overwrite
 												let _ = self.spaces.next();
 												// TODO: handle edge case when new record len != old record len
-												break (space.offset, true);
+												let previous_len = k.len() + value.len();
+												break (space.offset, Some(previous_len));
 											},
 											cmp::Ordering::Greater => {
 												// insert then write old record
-												break (space.offset, false);
+												break (space.offset, None);
 											}
 										}
 									}
@@ -159,8 +174,8 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 							};
 
 							// call insert operation
-							if overwrite {
-								OperationWriterState::OverwriteOperation(insert, 0)
+							if let Some(size) = previous_size {
+								OperationWriterState::OverwriteOperation(insert, size, 0)
 							} else {
 								OperationWriterState::InsertOperation(insert, 0)
 							}
@@ -176,19 +191,27 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 			OperationWriterState::InsertOperation(ref operation, len) => {
 				// write next operation to a buffer
 				let written = operation.write(self.buffer.as_raw_mut(), self.field_body_size, self.const_value);
+				// update metadata
+				self.metadata.insert_record(operation.key.prefix, operation.len());
 				// increase the len size by operation size
 				// advance to the next operation
 				OperationWriterState::Advance(len + written)
 			},
-			OperationWriterState::OverwriteOperation(ref operation, len) => {
+			OperationWriterState::OverwriteOperation(ref operation, previous_size, len) => {
 				// write overwrite operation to a buffer
 				let _ = operation.write(self.buffer.as_raw_mut(), self.field_body_size, self.const_value);
+				// update metadata
+				self.metadata.update_record_len(previous_size, operation.len());
 				// len should not be increased
 				// advance to the next operation
 				OperationWriterState::Advance(len)
 			},
 			OperationWriterState::DeleteOperation(ref operation, len) => {
 				// write to buffer deleted fields
+
+				// update metadata
+				self.metadata.remove_record(operation.key.prefix, operation.len);
+
 				// len should not be increased
 				// advance to the next operation
 				OperationWriterState::Advance(len)
@@ -213,7 +236,8 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 								OperationWriterState::OccupiedSpace(space, len)
 							},
 							Some(Operation::Insert(key, value)) => {
-								match Record::extract_key(&space.data, self.field_body_size, key.len()).partial_cmp(&key).unwrap() {
+								let key = Key::new(key, self.prefix_bits);
+								match Record::extract_key(&space.data, self.field_body_size, key.key.len()).partial_cmp(&key.key).unwrap() {
 									// existing record is smaller
 									cmp::Ordering::Less => {
 										// remove his space
@@ -229,7 +253,8 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 											value,
 										};
 										// TODO: handle edge case when new record len != old record len
-										OperationWriterState::OverwriteOperation(insert, len)
+										let previous_len = insert.len();
+										OperationWriterState::OverwriteOperation(insert, previous_len, len)
 									},
 									// existing record is greater, insert new record first
 									cmp::Ordering::Greater => {
@@ -272,6 +297,11 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 	#[inline]
 	pub fn run(mut self) -> Result<Vec<u8>> {
 		while let OperationWriterStep::Stepped = self.step()? {}
-		Ok(self.buffer.inner)
+		let mut result = self.buffer.inner;
+		let meta = self.metadata.as_bytes();
+		let old_len = result.len();
+		result.resize(old_len + meta.len(), 0);
+		meta.copy_to_slice(&mut result[old_len..]);
+		Ok(result)
 	}
 }

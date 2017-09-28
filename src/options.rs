@@ -2,17 +2,25 @@ use error::{ErrorKind, Result};
 use field;
 use record;
 
+/// A length of values stored in the DB.
 #[derive(Debug, PartialEq)]
 pub enum ValuesLen {
+	/// Values have constant length.
 	Constant(usize),
-	Variable { average: usize },
+	/// Values are dynamically sized.
+	Variable {
+		/// Expected size of the values.
+		/// Overestimating the size will result in a bigger database file.
+		/// Underestimating it will cause large number of collisions.
+		expected: usize
+	},
 }
 
 impl ValuesLen {
 	pub(crate) fn size(&self) -> usize {
 		match *self {
 			ValuesLen::Constant(x) => x,
-			ValuesLen::Variable { average } => record::HEADER_SIZE + average,
+			ValuesLen::Variable { expected } => record::HEADER_SIZE + expected,
 		}
 	}
 
@@ -32,6 +40,7 @@ impl ValuesLen {
 	}
 }
 
+/// Database options.
 #[derive(Debug, PartialEq)]
 pub struct Options {
 	/// Number of eras to keep in the journal.
@@ -92,7 +101,7 @@ impl InternalOptions {
 
 		let value_size = external.value_len.to_value_size();
 		let field_body_size = external.key_len + external.value_len.size();
-		let record_offset = field_body_size as usize + field::HEADER_SIZE as usize;
+		let record_offset = field::field_size(field_body_size as usize);
 		// +1 for last record with prefix 0xffff....
 		let initial_db_size = (2u64 << external.key_index_bits + 1) * record_offset as u64;
 
@@ -113,6 +122,6 @@ mod tests {
 	#[test]
 	fn test_values_len_const() {
 		assert_eq!(true, ValuesLen::Constant(1).is_const());
-		assert_eq!(false, ValuesLen::Variable { average: 5 }.is_const());
+		assert_eq!(false, ValuesLen::Variable { expected: 5 }.is_const());
 	}
 }

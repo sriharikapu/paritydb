@@ -1,26 +1,30 @@
 use std::io::Write;
 use std::path::{PathBuf, Path};
-use std::{cmp, fs};
+use std::{cmp, fs, mem};
+
+use memmap::{Mmap, Protection};
 
 use error::{ErrorKind, Result};
 use find;
+use flush::Flush;
 use journal::Journal;
 use key::Key;
-use memmap::{Mmap, Protection};
-use transaction::Transaction;
-use flush::Flush;
+use metadata::{self, Metadata};
 use options::{Options, InternalOptions};
 use record::Record;
+use transaction::Transaction;
 
-const DB_FILE: &str = "data.db";
-
+/// A database record value.
 #[derive(Debug, PartialEq)]
 pub enum Value<'a> {
+	/// Raw (cached/journaled) data
 	Raw(&'a [u8]),
+	/// DB record
 	Record(Record<'a>),
 }
 
 impl<'a> Value<'a> {
+	/// Allocate a `Vec` with the value.
 	pub fn to_vec(&self) -> Vec<u8> {
 		match *self {
 			Value::Raw(ref slice) => slice.to_vec(),
@@ -43,25 +47,45 @@ impl<'a, T: AsRef<[u8]>> PartialEq<T> for Value<'a> {
 	}
 }
 
+/// A top-level database API.
 #[derive(Debug)]
 pub struct Database {
-	journal: Journal,
-	options: InternalOptions,
-	mmap: Mmap,
 	path: PathBuf,
+	options: InternalOptions,
+	journal: Journal,
+	metadata: Metadata,
+	metadata_mmap: Mmap,
+	mmap: Mmap,
 }
 
 impl Database {
+	const DB_FILE: &'static str = "data.db";
+	const META_FILE: &'static str = "meta.db";
+
 	/// Creates new database at given location.
 	pub fn create<P: AsRef<Path>>(path: P, options: Options) -> Result<Self> {
 		let options = InternalOptions::from_external(options)?;
-		let db_file_path = path.as_ref().join(DB_FILE);
-		let mut file = fs::OpenOptions::new()
-			.write(true)
-			.create_new(true)
-			.open(&db_file_path)?;
-		file.set_len(options.initial_db_size)?;
-		file.flush()?;
+		// Create DB file.
+		{
+			let db_file_path = path.as_ref().join(Self::DB_FILE);
+			let mut file = fs::OpenOptions::new()
+				.write(true)
+				.create_new(true)
+				.open(&db_file_path)?;
+			file.set_len(options.initial_db_size)?;
+			file.flush()?;
+		}
+
+		// Create Metadata file.
+		{
+			let meta_file_path = path.as_ref().join(Self::META_FILE);
+			let mut file = fs::OpenOptions::new()
+				.write(true)
+				.create_new(true)
+				.open(&meta_file_path)?;
+			file.set_len(metadata::bytes::len(options.external.key_index_bits) as u64)?;
+			file.flush()?;
+		}
 
 		Self::open(path, options.external)
 	}
@@ -71,14 +95,21 @@ impl Database {
 		let options = InternalOptions::from_external(options)?;
 		let journal = Journal::open(&path)?;
 
-		let db_file_path = path.as_ref().join(DB_FILE);
-		let mmap = Mmap::open_path(&db_file_path, Protection::ReadWrite)?;
+		let db_file_path = path.as_ref().join(Self::DB_FILE);
+		let mmap = Mmap::open_path(db_file_path, Protection::ReadWrite)?;
+
+		let meta_file_path = path.as_ref().join(Self::META_FILE);
+		let metadata_mmap = Mmap::open_path(meta_file_path, Protection::ReadWrite)?;
+
+		let metadata = metadata::bytes::read(unsafe { metadata_mmap.as_slice() }, options.external.key_index_bits);
 
 		Ok(Database {
-			journal,
-			options,
-			mmap,
 			path: path.as_ref().to_owned(),
+			options,
+			journal,
+			metadata,
+			metadata_mmap,
+			mmap,
 		})
 	}
 
@@ -105,17 +136,23 @@ impl Database {
 				&self.path,
 				&self.options,
 				unsafe { self.mmap.as_slice() },
-				era.iter()
+				&self.metadata,
+				era.iter(),
 			)?;
 			era.delete()?;
-			flush.flush(unsafe { self.mmap.as_mut_slice() });
+			// TODO: metadata should be a single structure
+			// updateing self.metadata should happen after all calls
+			// which may fail ("?")
+			flush.flush(unsafe { self.mmap.as_mut_slice() }, unsafe { self.metadata_mmap.as_mut_slice() }, &mut self.metadata);
 			self.mmap.flush()?;
+			self.metadata_mmap.flush()?;
 			flush.delete()?;
 		}
 
 		Ok(())
 	}
 
+	/// Lookup a value associated with given `key`.
 	pub fn get<K: AsRef<[u8]>>(&self, key: K) -> Result<Option<Value>> {
 		let key = key.as_ref();
 		if key.len() != self.options.external.key_len {
@@ -130,6 +167,10 @@ impl Database {
 		let value_size = self.options.value_size;
 
 		let key = Key::new(key, self.options.external.key_index_bits);
+		if !self.metadata.prefixes.has(key.prefix).unwrap_or(false) {
+			return Ok(None);
+		}
+
 		let offset = key.prefix as usize * self.options.record_offset;
 		let data = unsafe { &self.mmap.as_slice()[offset..] };
 
@@ -179,6 +220,7 @@ mod tests {
 		assert_eq!(db.get("cde").unwrap(), None); // from DB
 
 		// Flush journal and fetch everything from DB.
+		// TODO [ToDr] Uncomment me.
 		// db.flush_journal(2).unwrap();
 
 		// assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
@@ -189,7 +231,7 @@ mod tests {
 	fn should_validate_key_length() {
 		let temp = tempdir::TempDir::new("create_insert_and_query").unwrap();
 
-		let mut db = Database::create(temp.path(), Options {
+		let db = Database::create(temp.path(), Options {
 			journal_eras: 0,
 			key_len: 3,
 			..Default::default()

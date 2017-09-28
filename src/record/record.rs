@@ -1,4 +1,5 @@
 use byteorder::{LittleEndian, ByteOrder};
+
 use field::view::FieldsView;
 
 /// Optional size of header for variable-len records.
@@ -22,6 +23,7 @@ pub struct Record<'a> {
 }
 
 impl<'a> Record<'a> {
+	/// Creates new record given the data slice, field body and value and key size.
 	pub fn new(data: &'a [u8], field_body_size: usize, value_size: ValueSize, key_size: usize) -> Self {
 		let view = FieldsView::new(data, field_body_size);
 		let (key, rest) = view.split_at(key_size);
@@ -53,28 +55,36 @@ impl<'a> Record<'a> {
 		LittleEndian::read_u32(&data)
 	}
 
+	/// Returns true of record key is equal to given slice.
 	// TODO [ToDr] IMHO it would be better to get rid of those methods and expose key and value directly:
 	// record.key() == <sth>
 	pub fn key_is_equal(&self, slice: &[u8]) -> bool {
 		self.key == slice
 	}
 
+	/// Returns true of record key is strictly greater than given slice.
 	pub fn key_is_greater(&self, slice: &[u8]) -> bool {
 		self.key > slice
 	}
 
+	/// Returns true of record value is equal to given slice.
 	pub fn value_is_equal(&self, slice: &[u8]) -> bool {
 		self.value == slice
 	}
 
+	/// Reads record key to given slice.
+	/// Panics if the size does not match.
 	pub fn read_key(&self, slice: &mut [u8]) {
 		self.key.copy_to_slice(slice);
 	}
 
+	/// Reads value to given slice.
+	/// Panics if the size does not match.
 	pub fn read_value(&self, slice: &mut [u8]) {
 		self.value.copy_to_slice(slice);
 	}
 
+	/// Returns record value length.
 	pub fn value_len(&self) -> usize {
 		self.len
 	}

@@ -1,4 +1,4 @@
-use std::{cmp, slice};
+use std::cmp;
 
 use field::header::HEADER_SIZE;
 use field::field_size;

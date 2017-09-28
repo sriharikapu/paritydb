@@ -49,6 +49,7 @@ impl<'a> Iterator for IdempotentOperationIterator<'a> {
 mod tests {
 	use super::{IdempotentOperation, IdempotentOperationIterator};
 
+	#[test]
 	fn test_positive_operations_iterator1() {
 		let data = &[
 			5, 0, 0, 0, 0, 0, 0, 0,
@@ -66,6 +67,7 @@ mod tests {
 		assert!(iterator.next().is_none());
 	}
 
+	#[test]
 	fn test_positive_operations_iterator2() {
 		let data = &[
 			5, 0, 0, 0, 0, 0, 0, 0,
