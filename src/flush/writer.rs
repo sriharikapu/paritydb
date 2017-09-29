@@ -8,7 +8,7 @@ use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use error::Result;
 use key::Key;
 use metadata::Metadata;
-use record::{append_record, Record};
+use record::{append_record, append_deleted, Record};
 use space::{SpaceIterator, Space, EmptySpace, OccupiedSpace};
 use transaction::Operation;
 
@@ -44,8 +44,8 @@ impl<'a> OverwriteOperation<'a> {
 		append_record(buffer, self.key.key, self.value, field_body_size, const_value);
 		let written = buffer.len() - buffer_len;
 		if self.old_len > written {
-			let new_len = buffer.len() + self.old_len - written;
-			buffer.resize(new_len, 3);
+			let deleted = self.old_len - written;
+			append_deleted(buffer, deleted, field_body_size);
 		}
 		buffer.len() - buffer_len
 	}
@@ -60,9 +60,9 @@ struct DeleteOperation<'a> {
 
 impl<'a> DeleteOperation<'a> {
 	/// Returns operation length
-	fn write(&self, buffer: &mut Vec<u8>) -> usize {
+	fn write(&self, buffer: &mut Vec<u8>, field_body_size: usize) -> usize {
 		let buffer_len = buffer.len();
-		buffer.resize(buffer_len + self.len, 3);
+		append_deleted(buffer, self.len, field_body_size);
 		self.len
 	}
 }
@@ -168,6 +168,9 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 								let space = self.spaces.peek().expect("TODO: db end")?;
 
 								match space {
+									Space::Deleted(ref space) => {
+										unimplemented!();
+									},
 									Space::Empty(ref space) => {
 										break (space.offset, None);
 									},
@@ -223,6 +226,9 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 								println!("key offset: {:?}", key.offset(self.field_body_size));
 								println!("space to delete: {:?}", space);
 								match space {
+									Space::Deleted(ref space) => {
+										unimplemented!();
+									},
 									Space::Empty(_) => {
 										// not found
 										break OperationWriterState::ConsumeNextOperation;
@@ -277,10 +283,10 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 			},
 			OperationWriterState::DeleteOperation(ref operation, len) => {
 				// write to buffer deleted fields
-				let _ = operation.write(self.buffer.as_raw_mut());
+				let _ = operation.write(self.buffer.as_raw_mut(), self.field_body_size);
 
 				// update metadata
-				self.metadata.remove_record(operation.key.prefix, operation.len);
+				//self.metadata.remove_record(operation.key.prefix, operation.len);
 
 				// len should not be increased
 				// advance to the next operation
@@ -294,6 +300,9 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 					OperationWriterState::ConsumeNextOperation
 				} else {
 					match space {
+						Space::Deleted(ref space) => {
+							unimplemented!();
+						},
 						Space::Empty(space) => {
 							// remove this space
 							let _ = self.spaces.next();

@@ -1,11 +1,30 @@
-use std::slice;
+use std::{slice, io, iter};
+use std::io::Read;
 use byteorder::{LittleEndian, ByteOrder};
 use field::{Header, field_size};
 
 struct RawRecordIterator<'a> {
 	key: slice::Iter<'a, u8>,
-	value_len: Option<slice::Iter<'a, u8>>,
 	value: slice::Iter<'a, u8>,
+	value_len: Option<io::Bytes<io::Cursor<[u8; 4]>>>,
+}
+
+impl<'a> RawRecordIterator<'a> {
+	fn new(key: &'a [u8], value: &'a [u8], const_value: bool) -> Self {
+		let value_len = if const_value {
+			None
+		} else {
+			let mut value_len = [0u8; 4];
+			LittleEndian::write_u32(&mut value_len, value.len() as u32);
+			Some(io::Cursor::new(value_len).bytes())
+		};
+
+		RawRecordIterator {
+			key: key.iter(),
+			value: value.iter(),
+			value_len,
+		}
+	}
 }
 
 impl<'a> Iterator for RawRecordIterator<'a> {
@@ -18,7 +37,7 @@ impl<'a> Iterator for RawRecordIterator<'a> {
 
 		if let Some(ref mut value_len) = self.value_len {
 			if let Some(item) = value_len.next() {
-				return Some(*item);
+				return Some(item.unwrap());
 			}
 		}
 
@@ -26,29 +45,37 @@ impl<'a> Iterator for RawRecordIterator<'a> {
 	}
 }
 
-struct RecordIterator<'a> {
-	inner: RawRecordIterator<'a>,
+struct RecordIterator<T> {
+	inner: T,
 	position: usize,
 	peeked: Option<u8>,
 	field_size: usize,
+	header: Header,
 }
 
-impl<'a> RecordIterator<'a> {
-	fn new(key: &'a [u8], value: &'a [u8], field_size: usize, value_len: Option<&'a [u8]>) -> Self {
+impl<T> RecordIterator<T> {
+	fn new_inserted(inner: T, field_size: usize) -> Self {
 		RecordIterator {
-			inner: RawRecordIterator {
-				key: key.iter(),
-				value: value.iter(),
-				value_len: value_len.map(|l| l.iter()),
-			},
+			inner,
 			position: 0,
 			peeked: None,
 			field_size,
+			header: Header::Inserted,
+		}
+	}
+
+	fn new_deleted(inner: T, field_size: usize) -> Self {
+		RecordIterator {
+			inner,
+			position: 0,
+			peeked: None,
+			field_size,
+			header: Header::Deleted,
 		}
 	}
 }
 
-impl<'a> Iterator for RecordIterator<'a> {
+impl<T: Iterator<Item = u8>> Iterator for RecordIterator<T> {
 	type Item = u8;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -61,7 +88,7 @@ impl<'a> Iterator for RecordIterator<'a> {
 			self.peeked = self.inner.next();
 			if self.peeked.is_some() {
 				self.position += 1;
-				Some(Header::Inserted as u8)
+				Some(self.header as u8)
 			} else {
 				None
 			}
@@ -84,19 +111,19 @@ impl<'a> Iterator for RecordIterator<'a> {
 }
 
 pub fn append_record(buffer: &mut Vec<u8>, key: &[u8], value: &[u8], field_body_size: usize, const_value: bool) {
-	// TODO: optimize is for records which are shorter than field_size
-	if const_value {
-		buffer.extend(RecordIterator::new(key, value, field_size(field_body_size), None));
-	} else {
-		let mut value_len = [0u8; 4];
-		LittleEndian::write_u32(&mut value_len, value.len() as u32);
-		buffer.extend(RecordIterator::new(key, value, field_size(field_body_size), Some(&value_len)));
-	}
+	//TODO: optimize is for records which are shorter than field_size
+	let raw_record = RawRecordIterator::new(key, value, const_value);
+	buffer.extend(RecordIterator::new_inserted(raw_record, field_size(field_body_size)));
+}
+
+pub fn append_deleted(buffer: &mut Vec<u8>, len: usize, field_body_size: usize) {
+	let raw_iter = iter::repeat(0).take(len);
+	buffer.extend(RecordIterator::new_deleted(raw_iter, field_size(field_body_size)));
 }
 
 #[cfg(test)]
 mod tests {
-	use super::append_record;
+	use super::{append_record, append_deleted};
 
 	#[test]
 	fn test_append_record_const1() {
@@ -173,6 +200,17 @@ mod tests {
 		let expected = b"\x01key\x05\x00\x00\x00value\x00\x00";
 
 		append_record(&mut buffer, key, value, field_body_size, const_value);
+		assert_eq!(expected as &[u8], &buffer as &[u8]);
+	}
+
+	#[test]
+	fn test_append_deleted() {
+		let mut buffer = Vec::new();
+		let len = 8;
+		let field_body_size = 3;
+		let expected = &[3u8, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0];
+
+		append_deleted(&mut buffer, len, field_body_size);
 		assert_eq!(expected as &[u8], &buffer as &[u8]);
 	}
 }
