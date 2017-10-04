@@ -5,7 +5,7 @@ use std::iter::Peekable;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 use error::Result;
-use flush::decision::{decision, Decision};
+use flush::decision::{decision, Decision, DecisionTip, is_min_offset};
 use key::Key;
 use metadata::Metadata;
 use record::{append_record, append_deleted};
@@ -34,6 +34,12 @@ fn overwrite_operation(buffer: &mut Vec<u8>, key: &[u8], value: &[u8], field_bod
 #[inline]
 fn write_delete_operation(buffer: &mut Vec<u8>, len: usize, field_body_size: usize) {
 	append_deleted(buffer, len, field_body_size);
+}
+
+#[inline]
+fn write_empty_bytes(buffer: &mut Vec<u8>, len: usize) {
+	let buffer_len = buffer.len();
+	buffer.resize(buffer_len + len, 0);
 }
 
 #[derive(Debug, PartialEq, Default)]
@@ -87,6 +93,7 @@ pub struct OperationWriter<'db, I: Iterator> {
 	prefix_bits: u8,
 	const_value: bool,
 	empty_bytes_debt: usize,
+	deleted_bytes_debt: usize,
 }
 
 impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
@@ -108,6 +115,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 			prefix_bits,
 			const_value,
 			empty_bytes_debt: 0,
+			deleted_bytes_debt: 0,
 		}
 	}
 
@@ -123,8 +131,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 							self.empty_bytes_debt -= space.len;
 						},
 						Space::Deleted(space) => {
-							// write it to a buffer if we are in 'rewrite' state
-							self.buffer.as_raw_mut().extend_from_slice(space.data);
+							unreachable!();
 						},
 						Space::Occupied(space) => {
 							// write it to a buffer if we are in 'rewrite' state
@@ -132,24 +139,53 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 						},
 					}
 				}
+
+				while self.deleted_bytes_debt != 0 {
+					let space = self.spaces.next().expect("TODO: db end")?;
+					match space {
+						Space::Empty(space) => {
+							write_empty_bytes(self.buffer.as_raw_mut(), self.deleted_bytes_debt);
+							self.deleted_bytes_debt = 0;
+						},
+						Space::Occupied(space) => {
+							unimplemented!();
+							// TODO: rewrite only if it smaller
+							// if it does not fit, change debt to empty and return step
+							//
+							// write it to a buffer if we are in 'rewrite' state
+							//self.buffer.as_raw_mut().extend_from_slice(space.data);
+						},
+						Space::Deleted(space) => {
+							unreachable!();
+						},
+					}
+				}
+
 				// write the len of previous operation
 				self.buffer.finish_operation();
 				return Ok(OperationWriterStep::Finished)
 			}
 		};
 
-		// if self.empty_bytes_debt != 0, we are in a different state, when a priority is consume spaces
 		let prefixed_key = Key::new(operation.key(), self.prefix_bits);
-		if self.empty_bytes_debt == 0 {
+
+		let tip = if self.empty_bytes_debt > 0 {
+			// assert deleted
+			DecisionTip::Continue
+		} else if self.deleted_bytes_debt > 0 {
+			// assert empty
+			DecisionTip::Delete
+		} else {
 			// write the len of previous operation
 			self.buffer.finish_operation();
 			self.spaces.move_offset_forward(prefixed_key.offset(self.field_body_size));
-		}
+			DecisionTip::New
+		};
 
-		assert_eq!(self.empty_bytes_debt == 0, self.buffer.is_finished());
+		//assert_eq!(self.empty_bytes_debt == 0, self.buffer.is_finished());
 
 		let space = self.spaces.peek().expect("TODO: db end?")?;
-		let d = decision(operation, space, self.buffer.is_finished(), self.field_body_size);
+		let d = decision(operation, space, tip, self.field_body_size, self.prefix_bits);
 		println!("d: {:?}", d);
 		match d {
 			Decision::InsertOperationIntoEmptySpace { key, value, offset, space_len } => {
@@ -164,6 +200,22 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 				self.empty_bytes_debt += written - space_len;
 				self.metadata.insert_record(prefixed_key.prefix, written);
 			},
+			Decision::InsertOperationIntoDeleteSpace { key, value, offset, space_len } => {
+				// advance iterators
+				let _ = self.operations.next();
+				let _ = self.spaces.next();
+
+				// no need to denote operation start, cause we are currently during shift
+				let written = write_insert_operation(self.buffer.as_raw_mut(), key, value, self.field_body_size, self.const_value);
+				// space has been consumed
+				if written > self.deleted_bytes_debt {
+					self.empty_bytes_debt = written - self.deleted_bytes_debt;
+					self.deleted_bytes_debt = 0;
+				} else {
+					self.deleted_bytes_debt -= written;
+				}
+				self.metadata.insert_record(prefixed_key.prefix, written);
+			},
 			Decision::InsertOperationBeforeOccupiedSpace { key, value, offset } => {
 				// advance iterators
 				let _ = self.operations.next();
@@ -174,6 +226,21 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 				self.empty_bytes_debt += written;
 				self.metadata.insert_record(prefixed_key.prefix, written);
 			},
+			Decision::InsertOperationBeforeOccupiedSpaceShifted { key, value, offset } => {
+				// advance iterators
+				let _ = self.operations.next();
+
+				// denote operation start
+				//self.buffer.denote_operation_start(offset as u64);
+				let written = write_insert_operation(self.buffer.as_raw_mut(), key, value, self.field_body_size, self.const_value);
+				if written > self.deleted_bytes_debt {
+					self.empty_bytes_debt = written - self.deleted_bytes_debt;
+					self.deleted_bytes_debt = 0;
+				} else {
+					self.deleted_bytes_debt -= 0;
+				}
+				self.metadata.insert_record(prefixed_key.prefix, written);
+			},
 			Decision::OverwriteOperation { key, value, offset, old_len } => {
 				// advance iterators
 				let _ = self.operations.next();
@@ -181,16 +248,40 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 
 				// denote operation start
 				self.buffer.denote_operation_start(offset as u64);
-				let written = overwrite_operation(self.buffer.as_raw_mut(), key, value, self.field_body_size, self.const_value, old_len);
-				assert!(written >= old_len, "old record has not been overwritten");
-				self.empty_bytes_debt += written - old_len;
+				let written = write_insert_operation(self.buffer.as_raw_mut(), key, value, self.field_body_size, self.const_value);
+				if old_len > written {
+					let to_remove = old_len - written;
+					if to_remove > self.empty_bytes_debt {
+						self.deleted_bytes_debt = to_remove - self.empty_bytes_debt;
+						self.empty_bytes_debt = 0;
+					} else {
+						self.empty_bytes_debt -= to_remove;
+					}
+				} else {
+					self.empty_bytes_debt += written;
+				}
 				// update metadata
 				self.metadata.update_record_len(old_len, written);
 			},
-			Decision::InsertIntoDeletedSpace { .. } => {
+			Decision::OverwriteOperationShifted { key, value, offset, old_len } => {
+				// advance iterators
+				let _ = self.operations.next();
 				let _ = self.spaces.next();
-				// TODO:
-				unimplemented!();
+
+				// denote operation start
+				self.buffer.denote_operation_start(offset as u64);
+				let written = write_insert_operation(self.buffer.as_raw_mut(), key, value, self.field_body_size, self.const_value);
+				if old_len > written {
+					self.deleted_bytes_debt += old_len - written
+				} else if written > old_len {
+					let new_bytes = written - old_len;
+					if new_bytes > self.deleted_bytes_debt {
+						self.empty_bytes_debt = new_bytes - self.deleted_bytes_debt;
+						self.deleted_bytes_debt = 0;
+					} else {
+						self.deleted_bytes_debt -= new_bytes;
+					}
+				}
 			},
 			Decision::SeekSpace => {
 				// advance iterator
@@ -204,22 +295,48 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 				let _ = self.spaces.next();
 				self.empty_bytes_debt -= len;
 			},
-			Decision::RewriteOccupiedSpace { data } => {
-				// advance space iterator
+			Decision::ShiftOccupiedSpace { data } => {
+				// advance iterators
 				let _ = self.spaces.next();
 				// rewrite the space to a buffer
 				self.buffer.as_raw_mut().extend_from_slice(data);
 			},
+			Decision::FinishDeletedSpace { len } => {
+				// do not advance iterator
+				// finish shift backwards
+				assert!(self.deleted_bytes_debt >= len, "space cannot be bigger than desired deleted space");
+				write_empty_bytes(self.buffer.as_raw_mut(), self.deleted_bytes_debt);
+				// change decision tip to new or continue
+				self.empty_bytes_debt = self.deleted_bytes_debt - len;
+				self.deleted_bytes_debt = 0;
+			},
 			Decision::DeleteOperation { offset, len } => {
-				// advance iterators
+				// advance operations
 				let _ = self.operations.next();
 				let _ = self.spaces.next();
 
 				// denote operation start
 				self.buffer.denote_operation_start(offset as u64);
-				write_delete_operation(self.buffer.as_raw_mut(), len, self.field_body_size);
+				//write_delete_operation(self.buffer.as_raw_mut(), len, self.field_body_size);
+				self.deleted_bytes_debt += len;
+			},
+			Decision::AlreadyOverwritten { len } => {
+				// advance iterators
+				let _ = self.operations.next();
+				let _ = self.spaces.next();
+
+				// no need to denote operation start, cause we are currently during shift
+				if len > self.empty_bytes_debt {
+					self.deleted_bytes_debt = len - self.empty_bytes_debt;
+					self.empty_bytes_debt = 0;
+				} else {
+					self.empty_bytes_debt -= len;
+				}
 			},
 		}
+
+		println!("empty_bytes_debt: {}", self.empty_bytes_debt);
+		println!("deleted_bytes_debt: {}", self.deleted_bytes_debt);
 		Ok(OperationWriterStep::Stepped)
 	}
 

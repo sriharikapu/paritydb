@@ -6,6 +6,7 @@
 //! later used to create idempotent database operation.
 
 use std::cmp;
+use key::Key;
 use record::Record;
 use space::Space;
 use transaction::Operation;
@@ -24,7 +25,18 @@ pub enum Decision<'o, 'db> {
 		value: &'o [u8],
 		offset: usize,
 	},
+	InsertOperationBeforeOccupiedSpaceShifted {
+		key: &'o [u8],
+		value: &'o [u8],
+		offset: usize,
+	},
 	InsertOperationIntoEmptySpace {
+		key: &'o [u8],
+		value: &'o [u8],
+		offset: usize,
+		space_len: usize,
+	},
+	InsertOperationIntoDeleteSpace {
 		key: &'o [u8],
 		value: &'o [u8],
 		offset: usize,
@@ -37,19 +49,6 @@ pub enum Decision<'o, 'db> {
 		value: &'o [u8],
 		offset: usize,
 		old_len: usize,
-	},
-	/// Returned when operation is an insert operation and the space is marked as deleted.
-	///
-	/// The operation should be checked with the next space.
-	/// If it's `InsertOperation`, it should be written in this space.
-	/// If it's `OverwriteOperation`, it should be written in that space.
-	/// If it's `InsertIntoDeletedSpace`, it should be checked with the space until different result occurs.
-	/// If it's `SeekSpace`, we spaces.iterator offset should be moved to this operation location.
-	/// All other cases are unreachable.
-	InsertIntoDeletedSpace {
-		key: &'o [u8],
-		value: &'o [u8],
-		offset: usize,
 	},
 	/// Returns when operation is a delete operation and it's key is equal
 	/// to existing record's key.
@@ -72,9 +71,21 @@ pub enum Decision<'o, 'db> {
 	ConsumeEmptySpace {
 		len: usize,
 	},
-	RewriteOccupiedSpace {
+	ShiftOccupiedSpace {
 		data: &'db [u8],
 	},
+	FinishDeletedSpace {
+		len: usize,
+	},
+	AlreadyOverwritten {
+		len: usize,
+	},
+	OverwriteOperationShifted {
+		key: &'o [u8],
+		value: &'o [u8],
+		offset: usize,
+		old_len: usize,
+	}
 }
 
 /// Compares occupied space data and operation key.
@@ -83,35 +94,82 @@ fn compare_space_and_operation(space: &[u8], key: &[u8], field_body_size: usize)
 	Record::extract_key(space, field_body_size, key.len()).partial_cmp(&key).unwrap()
 }
 
-pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, is_new: bool, field_body_size: usize) -> Decision<'o, 'db> {
-	match (operation, space, is_new) {
-		(Operation::Insert(key, value), Space::Empty(space), true) => Decision::InsertOperationIntoEmptySpace {
+#[inline]
+pub fn is_min_offset(offset: usize, key: &[u8], prefix_bits: u8, field_body_size: usize) -> bool {
+	let prefixed_key = Key::new(key, prefix_bits);
+	let min_offset = prefixed_key.offset(field_body_size);
+	min_offset <= offset
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum DecisionTip {
+	New,
+	Continue,
+	Delete,
+}
+
+pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, tip: DecisionTip, field_body_size: usize, prefix_bits: u8) -> Decision<'o, 'db> {
+	match (operation, space, tip) {
+		(Operation::Insert(key, value), Space::Empty(space), DecisionTip::New) => Decision::InsertOperationIntoEmptySpace {
 			key,
 			value,
 			offset: space.offset,
 			space_len: space.len,
 		},
-		(Operation::Insert(_, _), Space::Empty(space), false) => Decision::ConsumeEmptySpace {
+		(Operation::Insert(key, value), Space::Empty(space), DecisionTip::Delete) => if is_min_offset(space.offset, key, prefix_bits, field_body_size) {
+			Decision::InsertOperationIntoDeleteSpace {
+				key,
+				value,
+				offset: space.offset,
+				space_len: space.len,
+			}
+		} else {
+			Decision::FinishDeletedSpace {
+				len: space.len,
+			}
+		},
+		(Operation::Insert(_, _), Space::Empty(space), DecisionTip::Continue) => Decision::ConsumeEmptySpace {
 			len: space.len,
 		},
-		(Operation::Insert(key, value), Space::Deleted(space), _) => Decision::InsertIntoDeletedSpace {
-			key,
-			value,
-			offset: space.offset,
-		},
 		(Operation::Insert(key, value), Space::Occupied(space), _) => {
-			match compare_space_and_operation(space.data, key, field_body_size) {
-				cmp::Ordering::Less if is_new => Decision::SeekSpace,
-				cmp::Ordering::Less => Decision::RewriteOccupiedSpace {
+			match (compare_space_and_operation(space.data, key, field_body_size), tip) {
+				(cmp::Ordering::Less, DecisionTip::New) => Decision::SeekSpace,
+				(cmp::Ordering::Less, DecisionTip::Delete) => if is_min_offset(space.offset, key, prefix_bits, field_body_size) {
+					Decision::ShiftOccupiedSpace {
+						data: space.data,
+					}
+				} else {
+					Decision::FinishDeletedSpace {
+						len: space.data.len(),
+					}
+				},
+				(cmp::Ordering::Less, DecisionTip::Continue) => Decision::ShiftOccupiedSpace {
 					data: space.data,
 				},
-				cmp::Ordering::Equal => Decision::OverwriteOperation {
+				(cmp::Ordering::Equal, DecisionTip::Delete) => Decision::OverwriteOperationShifted {
 					key,
 					value,
 					offset: space.offset,
 					old_len: space.data.len()
 				},
-				cmp::Ordering::Greater => Decision::InsertOperationBeforeOccupiedSpace {
+				(cmp::Ordering::Equal, DecisionTip::New) | (cmp::Ordering::Equal, DecisionTip::Continue) => Decision::OverwriteOperation {
+					key,
+					value,
+					offset: space.offset,
+					old_len: space.data.len()
+				},
+				(cmp::Ordering::Greater, DecisionTip::Delete) => if is_min_offset(space.offset, key, prefix_bits, field_body_size) {
+					Decision::InsertOperationBeforeOccupiedSpaceShifted {
+						key,
+						value,
+						offset: space.offset,
+					}
+				} else {
+					Decision::FinishDeletedSpace {
+						len: space.data.len(),
+					}
+				},
+				(cmp::Ordering::Greater, DecisionTip::New) | (cmp::Ordering::Greater , DecisionTip::Continue) => Decision::InsertOperationBeforeOccupiedSpace {
 					key,
 					value,
 					offset: space.offset,
@@ -119,28 +177,48 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, is_new: bo
 			}
 		},
 		// record does not exist
-		(Operation::Delete(_), Space::Empty(_), true) => Decision::IgnoreOperation,
-		(Operation::Delete(_), Space::Empty(space), false) => Decision::ConsumeEmptySpace {
+		(Operation::Delete(_), Space::Empty(_), DecisionTip::New) => Decision::IgnoreOperation,
+		(Operation::Delete(_), Space::Empty(space), _) => Decision::ConsumeEmptySpace {
 			len: space.len,
 		},
-		// we know nothing about this space yet
-		(Operation::Delete(_), Space::Deleted(space), true) => Decision::SeekSpace,
-		(Operation::Delete(_), Space::Deleted(space), false) => Decision::RewriteOccupiedSpace {
-			data: space.data,
-		},
 		(Operation::Delete(key), Space::Occupied(space), _) => {
-			match compare_space_and_operation(space.data, key, field_body_size) {
-				cmp::Ordering::Less if is_new => Decision::SeekSpace,
-				cmp::Ordering::Less => Decision::RewriteOccupiedSpace {
+			match (compare_space_and_operation(space.data, key, field_body_size), tip) {
+				(cmp::Ordering::Less, DecisionTip::New) => Decision::SeekSpace,
+				(cmp::Ordering::Less, DecisionTip::Delete) => if is_min_offset(space.offset, key, prefix_bits, field_body_size) {
+					Decision::ShiftOccupiedSpace {
+						data: space.data,
+					}
+				} else {
+					Decision::FinishDeletedSpace {
+						len: space.data.len(),
+					}
+				},
+				(cmp::Ordering::Less, DecisionTip::Continue) => Decision::ShiftOccupiedSpace {
 					data: space.data,
 				},
-				cmp::Ordering::Equal => Decision::DeleteOperation {
+				(cmp::Ordering::Equal, DecisionTip::Continue) => Decision::AlreadyOverwritten {
+					len: space.data.len(),
+				},
+				(cmp::Ordering::Equal, DecisionTip::New) | (cmp::Ordering::Equal, DecisionTip::Delete) => Decision::DeleteOperation {
 					offset: space.offset,
 					len: space.data.len(),
 				},
 				// record does not exist
-				cmp::Ordering::Greater => Decision::IgnoreOperation,
+				(cmp::Ordering::Greater, _) => Decision::IgnoreOperation,
 			}
+		},
+		//(Operation::Insert(key, value), Space::Deleted(space), _) => Decision::InsertIntoDeletedSpace {
+			//key,
+			//value,
+			//offset: space.offset,
+		//},
+		// we know nothing about this space yet
+		//(Operation::Delete(_), Space::Deleted(space), true) => Decision::SeekSpace,
+		//(Operation::Delete(_), Space::Deleted(space), false) => Decision::ShiftOccupiedSpace {
+			//data: space.data,
+		//},
+		_ => {
+			unimplemented!();
 		},
 	}
 }
