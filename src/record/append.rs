@@ -101,7 +101,6 @@ impl<T: Iterator<Item = u8>> Iterator for RecordIterator<T> {
 }
 
 pub fn append_record(buffer: &mut Vec<u8>, key: &[u8], value: &[u8], field_body_size: usize, const_value: bool) {
-	//TODO: optimize is for records which are shorter than field_size
 	let raw_record = RawRecordIterator::new(key, value, const_value);
 	buffer.extend(RecordIterator::new_inserted(raw_record, field_size(field_body_size)));
 }

@@ -49,36 +49,36 @@ fn test_database_flush() {
 	assert_eq!(db.get("cde").unwrap(), None);
 }
 
-//#[test]
-//fn test_database_flush_shift_only_required1() {
-	//let temp = TempDir::new("test_database_flush").unwrap();
+#[test]
+fn test_database_flush_shift_only_required1() {
+	let temp = TempDir::new("test_database_flush").unwrap();
 
-	//let mut db = Database::create(temp.path(), Options {
-		//journal_eras: 0,
-		//key_len: 3,
-		//value_len: ValuesLen::Constant(3),
-		//..Default::default()
-	//}).unwrap();
+	let mut db = Database::create(temp.path(), Options {
+		journal_eras: 0,
+		key_len: 3,
+		value_len: ValuesLen::Constant(3),
+		..Default::default()
+	}).unwrap();
 
-	//let mut tx = Transaction::default();
-	//tx.insert("aaa", "001");
-	//tx.insert("bbb", "002");
+	let mut tx = Transaction::default();
+	tx.insert("aaa", "001");
+	tx.insert("bbb", "002");
 
-	//db.commit(&tx).unwrap();
-	//db.flush_journal(1).unwrap();
+	db.commit(&tx).unwrap();
+	db.flush_journal(1).unwrap();
 
-	//assert_eq!(db.get("aaa").unwrap().unwrap(), b"001");
-	//assert_eq!(db.get("bbb").unwrap().unwrap(), b"002");
+	assert_eq!(db.get("aaa").unwrap().unwrap(), b"001");
+	assert_eq!(db.get("bbb").unwrap().unwrap(), b"002");
 
-	//let mut tx = Transaction::default();
-	//tx.delete("aaa");
+	let mut tx = Transaction::default();
+	tx.delete("aaa");
 
-	//db.commit(&tx).unwrap();
-	//db.flush_journal(1).unwrap();
+	db.commit(&tx).unwrap();
+	db.flush_journal(1).unwrap();
 
-	//assert_eq!(db.get("aaa").unwrap(), None);
-	//assert_eq!(db.get("bbb").unwrap().unwrap(), b"002");
-//}
+	assert_eq!(db.get("aaa").unwrap(), None);
+	assert_eq!(db.get("bbb").unwrap().unwrap(), b"002");
+}
 
 #[test]
 fn test_database_flush_shift_only_required2() {

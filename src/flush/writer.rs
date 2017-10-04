@@ -5,7 +5,7 @@ use std::iter::Peekable;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 use error::Result;
-use flush::decision::{decision, Decision, is_min_offset};
+use flush::decision::{decision, Decision, is_min_offset_for_shift};
 use key::Key;
 use metadata::Metadata;
 use record::{append_record};
@@ -100,45 +100,49 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 		}
 	}
 
+	fn last_step(&mut self) -> Result<()> {
+		// loop until the transaction is finished
+		while self.shift > 0 {
+			let space = self.spaces.next().expect("TODO: db end")?;
+			match space {
+				Space::Empty(space) => {
+					self.shift -= space.len as isize;
+				},
+				Space::Occupied(space) => {
+					// write it to a buffer if we are in 'rewrite' state
+					self.buffer.as_raw_mut().extend_from_slice(space.data);
+				},
+			}
+		}
+
+		while self.shift < 0 {
+			let space = self.spaces.next().expect("TODO: db end")?;
+			match space {
+				Space::Empty(space) => {
+					write_empty_bytes(self.buffer.as_raw_mut(), (-self.shift) as usize);
+					self.shift = 0;
+				},
+				Space::Occupied(space) => {
+					if is_min_offset_for_shift(space.offset, self.shift, space.data, self.prefix_bits, self.field_body_size) {
+						self.buffer.as_raw_mut().extend_from_slice(space.data);
+					} else {
+						write_empty_bytes(self.buffer.as_raw_mut(), (-self.shift) as usize);
+						self.shift = 0;
+					}
+				},
+			}
+		}
+
+		// write the len of previous operation
+		self.buffer.finish_operation();
+		Ok(())
+	}
+
 	fn step(&mut self) -> Result<OperationWriterStep> {
-		let operation = match self.operations.peek() {
-			Some(operation) => operation.clone(),
+		let operation = match self.operations.peek().cloned() {
+			Some(operation) => operation,
 			None => {
-				// loop until the transaction is finished
-				while self.shift > 0 {
-					let space = self.spaces.next().expect("TODO: db end")?;
-					match space {
-						Space::Empty(space) => {
-							self.shift -= space.len as isize;
-						},
-						Space::Occupied(space) => {
-							// write it to a buffer if we are in 'rewrite' state
-							self.buffer.as_raw_mut().extend_from_slice(space.data);
-						},
-					}
-				}
-
-				while self.shift < 0 {
-					let space = self.spaces.next().expect("TODO: db end")?;
-					match space {
-						Space::Empty(space) => {
-							write_empty_bytes(self.buffer.as_raw_mut(), (-self.shift) as usize);
-
-							self.shift = 0;
-						},
-						Space::Occupied(space) => {
-							unimplemented!();
-							// TODO: rewrite only if it smaller
-							// if it does not fit, change debt to empty and return step
-							//
-							// write it to a buffer if we are in 'rewrite' state
-							//self.buffer.as_raw_mut().extend_from_slice(space.data);
-						},
-					}
-				}
-
-				// write the len of previous operation
-				self.buffer.finish_operation();
+				self.last_step()?;
 				return Ok(OperationWriterStep::Finished)
 			}
 		};
@@ -150,8 +154,6 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 			self.buffer.finish_operation();
 			self.spaces.move_offset_forward(prefixed_key.offset(self.field_body_size));
 		};
-
-		//assert_eq!(self.empty_bytes_debt == 0, self.buffer.is_finished());
 
 		let space = self.spaces.peek().expect("TODO: db end?")?;
 		let d = decision(operation, space, self.shift, self.field_body_size, self.prefix_bits);
