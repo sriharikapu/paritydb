@@ -25,18 +25,7 @@ pub enum Decision<'o, 'db> {
 		value: &'o [u8],
 		offset: usize,
 	},
-	InsertOperationBeforeOccupiedSpaceShifted {
-		key: &'o [u8],
-		value: &'o [u8],
-		offset: usize,
-	},
 	InsertOperationIntoEmptySpace {
-		key: &'o [u8],
-		value: &'o [u8],
-		offset: usize,
-		space_len: usize,
-	},
-	InsertOperationIntoDeleteSpace {
 		key: &'o [u8],
 		value: &'o [u8],
 		offset: usize,
@@ -74,18 +63,7 @@ pub enum Decision<'o, 'db> {
 	ShiftOccupiedSpace {
 		data: &'db [u8],
 	},
-	FinishDeletedSpace {
-		len: usize,
-	},
-	AlreadyOverwritten {
-		len: usize,
-	},
-	OverwriteOperationShifted {
-		key: &'o [u8],
-		value: &'o [u8],
-		offset: usize,
-		old_len: usize,
-	}
+	FinishDeletedSpace
 }
 
 /// Compares occupied space data and operation key.
@@ -117,16 +95,14 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, tip: Decis
 			space_len: space.len,
 		},
 		(Operation::Insert(key, value), Space::Empty(space), DecisionTip::Delete) => if is_min_offset(space.offset, key, prefix_bits, field_body_size) {
-			Decision::InsertOperationIntoDeleteSpace {
+			Decision::InsertOperationIntoEmptySpace {
 				key,
 				value,
 				offset: space.offset,
 				space_len: space.len,
 			}
 		} else {
-			Decision::FinishDeletedSpace {
-				len: space.len,
-			}
+			Decision::FinishDeletedSpace
 		},
 		(Operation::Insert(_, _), Space::Empty(space), DecisionTip::Continue) => Decision::ConsumeEmptySpace {
 			len: space.len,
@@ -139,35 +115,25 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, tip: Decis
 						data: space.data,
 					}
 				} else {
-					Decision::FinishDeletedSpace {
-						len: space.data.len(),
-					}
+					Decision::FinishDeletedSpace
 				},
 				(cmp::Ordering::Less, DecisionTip::Continue) => Decision::ShiftOccupiedSpace {
 					data: space.data,
 				},
-				(cmp::Ordering::Equal, DecisionTip::Delete) => Decision::OverwriteOperationShifted {
-					key,
-					value,
-					offset: space.offset,
-					old_len: space.data.len()
-				},
-				(cmp::Ordering::Equal, DecisionTip::New) | (cmp::Ordering::Equal, DecisionTip::Continue) => Decision::OverwriteOperation {
+				(cmp::Ordering::Equal, _) => Decision::OverwriteOperation {
 					key,
 					value,
 					offset: space.offset,
 					old_len: space.data.len()
 				},
 				(cmp::Ordering::Greater, DecisionTip::Delete) => if is_min_offset(space.offset, key, prefix_bits, field_body_size) {
-					Decision::InsertOperationBeforeOccupiedSpaceShifted {
+					Decision::InsertOperationBeforeOccupiedSpace {
 						key,
 						value,
 						offset: space.offset,
 					}
 				} else {
-					Decision::FinishDeletedSpace {
-						len: space.data.len(),
-					}
+					Decision::FinishDeletedSpace
 				},
 				(cmp::Ordering::Greater, DecisionTip::New) | (cmp::Ordering::Greater , DecisionTip::Continue) => Decision::InsertOperationBeforeOccupiedSpace {
 					key,
@@ -189,36 +155,18 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, tip: Decis
 						data: space.data,
 					}
 				} else {
-					Decision::FinishDeletedSpace {
-						len: space.data.len(),
-					}
+					Decision::FinishDeletedSpace
 				},
 				(cmp::Ordering::Less, DecisionTip::Continue) => Decision::ShiftOccupiedSpace {
 					data: space.data,
 				},
-				(cmp::Ordering::Equal, DecisionTip::Continue) => Decision::AlreadyOverwritten {
-					len: space.data.len(),
-				},
-				(cmp::Ordering::Equal, DecisionTip::New) | (cmp::Ordering::Equal, DecisionTip::Delete) => Decision::DeleteOperation {
+				(cmp::Ordering::Equal, _) => Decision::DeleteOperation {
 					offset: space.offset,
 					len: space.data.len(),
 				},
 				// record does not exist
 				(cmp::Ordering::Greater, _) => Decision::IgnoreOperation,
 			}
-		},
-		//(Operation::Insert(key, value), Space::Deleted(space), _) => Decision::InsertIntoDeletedSpace {
-			//key,
-			//value,
-			//offset: space.offset,
-		//},
-		// we know nothing about this space yet
-		//(Operation::Delete(_), Space::Deleted(space), true) => Decision::SeekSpace,
-		//(Operation::Delete(_), Space::Deleted(space), false) => Decision::ShiftOccupiedSpace {
-			//data: space.data,
-		//},
-		_ => {
-			unimplemented!();
 		},
 	}
 }

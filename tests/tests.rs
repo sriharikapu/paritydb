@@ -6,7 +6,7 @@ use paritydb::{Database, Options, Transaction, ValuesLen};
 
 #[test]
 fn test_database_flush() {
-	let temp = TempDir::new("test_database_open").unwrap();
+	let temp = TempDir::new("test_database_flush").unwrap();
 
 	let mut db = Database::create(temp.path(), Options {
 		journal_eras: 0,
@@ -47,4 +47,68 @@ fn test_database_flush() {
 	assert_eq!(db.get("abd").unwrap().unwrap(), b"005");
 	assert_eq!(db.get("abc").unwrap(), None);
 	assert_eq!(db.get("cde").unwrap(), None);
+}
+
+//#[test]
+//fn test_database_flush_shift_only_required1() {
+	//let temp = TempDir::new("test_database_flush").unwrap();
+
+	//let mut db = Database::create(temp.path(), Options {
+		//journal_eras: 0,
+		//key_len: 3,
+		//value_len: ValuesLen::Constant(3),
+		//..Default::default()
+	//}).unwrap();
+
+	//let mut tx = Transaction::default();
+	//tx.insert("aaa", "001");
+	//tx.insert("bbb", "002");
+
+	//db.commit(&tx).unwrap();
+	//db.flush_journal(1).unwrap();
+
+	//assert_eq!(db.get("aaa").unwrap().unwrap(), b"001");
+	//assert_eq!(db.get("bbb").unwrap().unwrap(), b"002");
+
+	//let mut tx = Transaction::default();
+	//tx.delete("aaa");
+
+	//db.commit(&tx).unwrap();
+	//db.flush_journal(1).unwrap();
+
+	//assert_eq!(db.get("aaa").unwrap(), None);
+	//assert_eq!(db.get("bbb").unwrap().unwrap(), b"002");
+//}
+
+#[test]
+fn test_database_flush_shift_only_required2() {
+	let temp = TempDir::new("test_database_flush").unwrap();
+
+	let mut db = Database::create(temp.path(), Options {
+		journal_eras: 0,
+		key_len: 3,
+		value_len: ValuesLen::Constant(3),
+		..Default::default()
+	}).unwrap();
+
+	let mut tx = Transaction::default();
+	tx.insert("aaa", "001");
+	tx.insert("bbb", "002");
+
+	db.commit(&tx).unwrap();
+	db.flush_journal(1).unwrap();
+
+	assert_eq!(db.get("aaa").unwrap().unwrap(), b"001");
+	assert_eq!(db.get("bbb").unwrap().unwrap(), b"002");
+
+	let mut tx = Transaction::default();
+	tx.delete("aaa");
+	tx.insert("ccc", "003");
+
+	db.commit(&tx).unwrap();
+	db.flush_journal(1).unwrap();
+
+	assert_eq!(db.get("aaa").unwrap(), None);
+	assert_eq!(db.get("bbb").unwrap().unwrap(), b"002");
+	assert_eq!(db.get("ccc").unwrap().unwrap(), b"003");
 }
