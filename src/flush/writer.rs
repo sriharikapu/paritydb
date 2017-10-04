@@ -5,7 +5,7 @@ use std::iter::Peekable;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 use error::Result;
-use flush::decision::{decision, Decision, DecisionTip, is_min_offset};
+use flush::decision::{decision, Decision, is_min_offset};
 use key::Key;
 use metadata::Metadata;
 use record::{append_record};
@@ -145,21 +145,16 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 
 		let prefixed_key = Key::new(operation.key(), self.prefix_bits);
 
-		let tip = if self.shift > 0 {
-			DecisionTip::Continue
-		} else if  self.shift < 0 {
-			DecisionTip::Delete
-		} else {
+		if self.shift == 0 {
 			// write the len of previous operation
 			self.buffer.finish_operation();
 			self.spaces.move_offset_forward(prefixed_key.offset(self.field_body_size));
-			DecisionTip::New
 		};
 
 		//assert_eq!(self.empty_bytes_debt == 0, self.buffer.is_finished());
 
 		let space = self.spaces.peek().expect("TODO: db end?")?;
-		let d = decision(operation, space, tip, self.field_body_size, self.prefix_bits);
+		let d = decision(operation, space, self.shift, self.field_body_size, self.prefix_bits);
 		println!("d: {:?}", d);
 		match d {
 			Decision::InsertOperationIntoEmptySpace { key, value, offset, space_len } => {
