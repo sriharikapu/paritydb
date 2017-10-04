@@ -26,7 +26,7 @@ impl<'a> Field<'a> {
 	#[inline]
 	pub fn is_empty(&self) -> Result<bool, Error> {
 		match self.header()? {
-			Header::Uninitialized | Header::Deleted => Ok(true),
+			Header::Uninitialized => Ok(true),
 			_ => Ok(false),
 		}
 	}

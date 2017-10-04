@@ -8,7 +8,7 @@ use error::Result;
 use flush::decision::{decision, Decision, DecisionTip, is_min_offset};
 use key::Key;
 use metadata::Metadata;
-use record::{append_record, append_deleted};
+use record::{append_record};
 use space::{SpaceIterator, Space};
 use transaction::Operation;
 
@@ -17,23 +17,6 @@ fn write_insert_operation(buffer: &mut Vec<u8>, key: &[u8], value: &[u8], field_
 	let buffer_len = buffer.len();
 	append_record(buffer, key, value, field_body_size, const_value);
 	buffer.len() - buffer_len
-}
-
-#[inline]
-fn overwrite_operation(buffer: &mut Vec<u8>, key: &[u8], value: &[u8], field_body_size: usize, const_value: bool, old_len: usize) -> usize {
-	let buffer_len = buffer.len();
-	append_record(buffer, key, value, field_body_size, const_value);
-	let written = buffer.len() - buffer_len;
-	if written < old_len {
-		let deleted = old_len - written;
-		append_deleted(buffer, deleted, field_body_size);
-	}
-	buffer.len() - buffer_len
-}
-
-#[inline]
-fn write_delete_operation(buffer: &mut Vec<u8>, len: usize, field_body_size: usize) {
-	append_deleted(buffer, len, field_body_size);
 }
 
 #[inline]
@@ -130,9 +113,6 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 						Space::Empty(space) => {
 							self.empty_bytes_debt -= space.len;
 						},
-						Space::Deleted(space) => {
-							unreachable!();
-						},
 						Space::Occupied(space) => {
 							// write it to a buffer if we are in 'rewrite' state
 							self.buffer.as_raw_mut().extend_from_slice(space.data);
@@ -154,9 +134,6 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 							//
 							// write it to a buffer if we are in 'rewrite' state
 							//self.buffer.as_raw_mut().extend_from_slice(space.data);
-						},
-						Space::Deleted(space) => {
-							unreachable!();
 						},
 					}
 				}
@@ -317,7 +294,6 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 
 				// denote operation start
 				self.buffer.denote_operation_start(offset as u64);
-				//write_delete_operation(self.buffer.as_raw_mut(), len, self.field_body_size);
 				self.deleted_bytes_debt += len;
 			},
 			Decision::AlreadyOverwritten { len } => {

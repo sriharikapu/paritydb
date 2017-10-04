@@ -63,16 +63,6 @@ impl<T> RecordIterator<T> {
 			header: Header::Inserted,
 		}
 	}
-
-	fn new_deleted(inner: T, field_size: usize) -> Self {
-		RecordIterator {
-			inner,
-			position: 0,
-			peeked: None,
-			field_size,
-			header: Header::Deleted,
-		}
-	}
 }
 
 impl<T: Iterator<Item = u8>> Iterator for RecordIterator<T> {
@@ -116,14 +106,9 @@ pub fn append_record(buffer: &mut Vec<u8>, key: &[u8], value: &[u8], field_body_
 	buffer.extend(RecordIterator::new_inserted(raw_record, field_size(field_body_size)));
 }
 
-pub fn append_deleted(buffer: &mut Vec<u8>, len: usize, field_body_size: usize) {
-	let raw_iter = iter::repeat(0).take(raw_data_len(len, field_body_size));
-	buffer.extend(RecordIterator::new_deleted(raw_iter, field_size(field_body_size)));
-}
-
 #[cfg(test)]
 mod tests {
-	use super::{append_record, append_deleted};
+	use super::{append_record};
 
 	#[test]
 	fn test_append_record_const1() {
@@ -200,17 +185,6 @@ mod tests {
 		let expected = b"\x01key\x05\x00\x00\x00value\x00\x00";
 
 		append_record(&mut buffer, key, value, field_body_size, const_value);
-		assert_eq!(expected as &[u8], &buffer as &[u8]);
-	}
-
-	#[test]
-	fn test_append_deleted() {
-		let mut buffer = Vec::new();
-		let len = 8;
-		let field_body_size = 3;
-		let expected = &[3u8, 0, 0, 0, 2, 0, 0, 0];
-
-		append_deleted(&mut buffer, len, field_body_size);
 		assert_eq!(expected as &[u8], &buffer as &[u8]);
 	}
 }

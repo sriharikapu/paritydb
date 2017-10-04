@@ -27,16 +27,9 @@ pub struct EmptySpace {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct DeletedSpace<'a> {
-	pub offset: usize,
-	pub data: &'a [u8],
-}
-
-#[derive(Debug, PartialEq, Clone)]
 pub enum Space<'a> {
 	Occupied(OccupiedSpace<'a>),
 	Empty(EmptySpace),
-	Deleted(DeletedSpace<'a>),
 }
 
 #[derive(Debug)]
@@ -95,19 +88,15 @@ impl<'a> Iterator for SpaceIterator<'a> {
 						self.offset += field_size;
 						continue;
 					},
-					Some(Header::Deleted) | Some(Header::Inserted) => {
+					Some(Header::Inserted) => {
 						self.offset += field_size;
 					},
 					Some(Header::Continued) | Some(Header::Uninitialized) => {
 						unreachable!();
 					},
 				},
-				Header::Inserted | Header::Deleted => match first_header {
+				Header::Inserted => match first_header {
 					Some(Header::Inserted) => return Some(Ok(Space::Occupied(OccupiedSpace {
-						offset: start,
-						data: &self.data[start..self.offset],
-					}))),
-					Some(Header::Deleted) => return Some(Ok(Space::Deleted(DeletedSpace {
 						offset: start,
 						data: &self.data[start..self.offset],
 					}))),
@@ -121,10 +110,6 @@ impl<'a> Iterator for SpaceIterator<'a> {
 				Header::Uninitialized => match first_header {
 					// inserted is unreachable
 					Some(Header::Inserted) => return Some(Ok(Space::Occupied(OccupiedSpace {
-						offset: start,
-						data: &self.data[start..self.offset],
-					}))),
-					Some(Header::Deleted) => return Some(Ok(Space::Deleted(DeletedSpace {
 						offset: start,
 						data: &self.data[start..self.offset],
 					}))),
@@ -156,10 +141,6 @@ impl<'a> Iterator for SpaceIterator<'a> {
 				offset: start,
 				data: &self.data[start..self.offset],
 			})),
-			Header::Deleted => Ok(Space::Deleted(DeletedSpace {
-				offset: start,
-				data: &self.data[start..self.offset],
-			})),
 			Header::Uninitialized => Ok(Space::Empty(EmptySpace {
 				offset: start,
 				len: self.offset - start,
@@ -173,7 +154,7 @@ impl<'a> Iterator for SpaceIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-	use super::{SpaceIterator, Space, EmptySpace, OccupiedSpace, DeletedSpace};
+	use super::{SpaceIterator, Space, EmptySpace, OccupiedSpace};
 
 	#[test]
 	fn test_empty_space_iterator() {
@@ -329,24 +310,6 @@ mod tests {
 
 		let first_elem = Space::Occupied(OccupiedSpace { offset, data: &data[0..8] });
 		let second_elem = Space::Occupied(OccupiedSpace { offset: 8, data: &data[8..12] });
-		let mut iterator = SpaceIterator::new(data, field_body_size, offset);
-		assert_eq!(first_elem, iterator.next().unwrap().unwrap());
-		assert_eq!(second_elem, iterator.next().unwrap().unwrap());
-		assert!(iterator.next().is_none());
-	}
-
-	#[test]
-	fn test_space_iterator_short_delete_after_long_delete() {
-		let data = &[
-			3, 1, 2, 3,
-			2, 4, 5, 6,
-			3, 7, 8, 9
-		];
-		let field_body_size = 3;
-		let offset = 0;
-
-		let first_elem = Space::Deleted(DeletedSpace { offset, data: &data[0..8] });
-		let second_elem = Space::Deleted(DeletedSpace { offset: 8, data: &data[8..12] });
 		let mut iterator = SpaceIterator::new(data, field_body_size, offset);
 		assert_eq!(first_elem, iterator.next().unwrap().unwrap());
 		assert_eq!(second_elem, iterator.next().unwrap().unwrap());

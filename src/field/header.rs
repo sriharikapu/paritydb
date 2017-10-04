@@ -10,15 +10,12 @@ pub enum Header {
 	Inserted = Header::INSERTED,
 	/// Indicates that the field is continuation of other field which is either `Inserted` or `Deleted`.
 	Continued = Header::CONTINUED,
-	/// Inficates that the field is the beginning of the deleted record.
-	Deleted = Header::DELETED,
 }
 
 impl Header {
 	const UNINITIALIZED: u8 = 0;
 	const INSERTED: u8 = 1;
 	const CONTINUED: u8 = 2;
-	const DELETED: u8 = 3;
 
 	/// Converts `Header` to u8
 	pub fn as_u8(&self) -> u8 {
@@ -31,7 +28,6 @@ impl Header {
 			Self::UNINITIALIZED => Some(Header::Uninitialized),
 			Self::INSERTED => Some(Header::Inserted),
 			Self::CONTINUED => Some(Header::Continued),
-			Self::DELETED => Some(Header::Deleted),
 			_ => None,
 		}
 	}

@@ -38,13 +38,6 @@ pub fn find_record<'a>(
 				}
 			},
 			Header::Continued => {},
-			Header::Deleted => {
-				let offset = (field_body_size + HEADER_SIZE) * index;
-				match Record::extract_key(&data[offset..], field_body_size, key.len()).partial_cmp(&key) {
-					Some(cmp::Ordering::Less) => {},
-					_ => return Ok(RecordResult::NotFound),
-				}
-			}
 		}
 	}
 
@@ -92,19 +85,6 @@ mod tests {
 		let key2 = [4, 5, 6];
 
 		expect_record(find_record(&data, body_size, value_size, &key).unwrap(), &[1, 2, 3], &[]);
-		expect_record(find_record(&data, body_size, value_size, &key2).unwrap(), &[4, 5, 6], &[]);
-	}
-
-	#[test]
-	fn test_find_deleted_record_location_for_reading() {
-		let value_size = record::ValueSize::Constant(0);
-		let body_size = 3;
-		let data = [3, 1, 2, 3, 1, 4, 5, 6];
-		let key = [1, 2, 3];
-		let key2 = [4, 5, 6];
-		let location = RecordResult::NotFound;
-
-		assert_eq(location, find_record(&data, body_size, value_size, &key).unwrap());
 		expect_record(find_record(&data, body_size, value_size, &key2).unwrap(), &[4, 5, 6], &[]);
 	}
 
