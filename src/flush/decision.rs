@@ -63,14 +63,18 @@ pub enum Decision<'o, 'db> {
 	/// No decision could be made.
 	///
 	/// If it's occupied space, it should be appended to current idempotent operation.
-	SeekSpace {
-		data: &'db [u8],
-	},
+	SeekSpace,
 	/// Returned only on delete, when deleted value is not found in the database.
 	///
 	/// Operations iterator should be moved to the next value.
 	/// Spaces iterator offset should be moved to next operation location.
-	Ignore,
+	IgnoreOperation,
+	ConsumeEmptySpace {
+		len: usize,
+	},
+	RewriteOccupiedSpace {
+		data: &'db [u8],
+	},
 }
 
 /// Compares occupied space data and operation key.
@@ -79,22 +83,26 @@ fn compare_space_and_operation(space: &[u8], key: &[u8], field_body_size: usize)
 	Record::extract_key(space, field_body_size, key.len()).partial_cmp(&key).unwrap()
 }
 
-pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, field_body_size: usize) -> Decision<'o, 'db> {
-	match (operation, space) {
-		(Operation::Insert(key, value), Space::Empty(space)) => Decision::InsertOperationIntoEmptySpace {
+pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, is_new: bool, field_body_size: usize) -> Decision<'o, 'db> {
+	match (operation, space, is_new) {
+		(Operation::Insert(key, value), Space::Empty(space), true) => Decision::InsertOperationIntoEmptySpace {
 			key,
 			value,
 			offset: space.offset,
 			space_len: space.len,
 		},
-		(Operation::Insert(key, value), Space::Deleted(space)) => Decision::InsertIntoDeletedSpace {
+		(Operation::Insert(_, _), Space::Empty(space), false) => Decision::ConsumeEmptySpace {
+			len: space.len,
+		},
+		(Operation::Insert(key, value), Space::Deleted(space), _) => Decision::InsertIntoDeletedSpace {
 			key,
 			value,
 			offset: space.offset,
 		},
-		(Operation::Insert(key, value), Space::Occupied(space)) => {
+		(Operation::Insert(key, value), Space::Occupied(space), _) => {
 			match compare_space_and_operation(space.data, key, field_body_size) {
-				cmp::Ordering::Less => Decision::SeekSpace {
+				cmp::Ordering::Less if is_new => Decision::SeekSpace,
+				cmp::Ordering::Less => Decision::RewriteOccupiedSpace {
 					data: space.data,
 				},
 				cmp::Ordering::Equal => Decision::OverwriteOperation {
@@ -111,14 +119,19 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, field_body
 			}
 		},
 		// record does not exist
-		(Operation::Delete(_), Space::Empty(_)) => Decision::Ignore,
+		(Operation::Delete(_), Space::Empty(_), true) => Decision::IgnoreOperation,
+		(Operation::Delete(_), Space::Empty(space), false) => Decision::ConsumeEmptySpace {
+			len: space.len,
+		},
 		// we know nothing about this space yet
-		(Operation::Delete(_), Space::Deleted(space)) => Decision::SeekSpace {
+		(Operation::Delete(_), Space::Deleted(space), true) => Decision::SeekSpace,
+		(Operation::Delete(_), Space::Deleted(space), false) => Decision::RewriteOccupiedSpace {
 			data: space.data,
 		},
-		(Operation::Delete(key), Space::Occupied(space)) => {
+		(Operation::Delete(key), Space::Occupied(space), _) => {
 			match compare_space_and_operation(space.data, key, field_body_size) {
-				cmp::Ordering::Less => Decision::SeekSpace {
+				cmp::Ordering::Less if is_new => Decision::SeekSpace,
+				cmp::Ordering::Less => Decision::RewriteOccupiedSpace {
 					data: space.data,
 				},
 				cmp::Ordering::Equal => Decision::DeleteOperation {
@@ -126,7 +139,7 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, field_body
 					len: space.data.len(),
 				},
 				// record does not exist
-				cmp::Ordering::Greater => Decision::Ignore,
+				cmp::Ordering::Greater => Decision::IgnoreOperation,
 			}
 		},
 	}

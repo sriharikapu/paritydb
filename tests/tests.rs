@@ -47,4 +47,5 @@ fn test_database_flush() {
 	assert_eq!(db.get("abd").unwrap().unwrap(), b"005");
 	assert_eq!(db.get("abc").unwrap(), None);
 	assert_eq!(db.get("cde").unwrap(), None);
+	//assert!(false);
 }

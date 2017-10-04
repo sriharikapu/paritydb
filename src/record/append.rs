@@ -1,7 +1,7 @@
 use std::{slice, io, iter};
 use std::io::Read;
 use byteorder::{LittleEndian, ByteOrder};
-use field::{Header, field_size};
+use field::{raw_data_len, Header, field_size};
 
 struct RawRecordIterator<'a> {
 	key: slice::Iter<'a, u8>,
@@ -117,7 +117,7 @@ pub fn append_record(buffer: &mut Vec<u8>, key: &[u8], value: &[u8], field_body_
 }
 
 pub fn append_deleted(buffer: &mut Vec<u8>, len: usize, field_body_size: usize) {
-	let raw_iter = iter::repeat(0).take(len);
+	let raw_iter = iter::repeat(0).take(raw_data_len(len, field_body_size));
 	buffer.extend(RecordIterator::new_deleted(raw_iter, field_size(field_body_size)));
 }
 
@@ -208,7 +208,7 @@ mod tests {
 		let mut buffer = Vec::new();
 		let len = 8;
 		let field_body_size = 3;
-		let expected = &[3u8, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0];
+		let expected = &[3u8, 0, 0, 0, 2, 0, 0, 0];
 
 		append_deleted(&mut buffer, len, field_body_size);
 		assert_eq!(expected as &[u8], &buffer as &[u8]);
