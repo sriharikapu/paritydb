@@ -187,6 +187,7 @@ mod tests {
 	extern crate tempdir;
 
 	use super::{Database, Options};
+	use options::ValuesLen;
 	use error::ErrorKind;
 	use transaction::Transaction;
 
@@ -197,6 +198,7 @@ mod tests {
 		let mut db = Database::create(temp.path(), Options {
 			journal_eras: 0,
 			key_len: 3,
+			value_len: ValuesLen::Constant(3),
 			..Default::default()
 		}).unwrap();
 
@@ -221,10 +223,10 @@ mod tests {
 
 		// Flush journal and fetch everything from DB.
 		// TODO [ToDr] Uncomment me.
-		//db.flush_journal(2).unwrap();
+		db.flush_journal(2).unwrap();
 
-		//assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
-		//assert_eq!(db.get("cde").unwrap(), None);
+		assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
+		assert_eq!(db.get("cde").unwrap(), None);
 	}
 
 	#[test]

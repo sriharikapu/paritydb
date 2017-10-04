@@ -1,7 +1,7 @@
-use std::{slice, io, iter};
+use std::{slice, io};
 use std::io::Read;
 use byteorder::{LittleEndian, ByteOrder};
-use field::{raw_data_len, Header, field_size};
+use field::{Header, field_size};
 
 struct RawRecordIterator<'a> {
 	key: slice::Iter<'a, u8>,
