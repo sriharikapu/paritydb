@@ -24,7 +24,7 @@ impl<'a> Operation<'a> {
 	const INSERT: u8 = 0;
 	const DELETE: u8 = 1;
 
-	fn key(&self) -> &'a [u8] {
+	pub fn key(&self) -> &'a [u8] {
 		match *self {
 			Operation::Insert(key, _) | Operation::Delete(key) => key,
 		}
