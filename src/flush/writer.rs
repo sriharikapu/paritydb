@@ -212,7 +212,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 				// rewrite the space to a buffer
 				self.buffer.as_raw_mut().extend_from_slice(data);
 			},
-			Decision::FinishDeletedSpace => {
+			Decision::FinishBackwardShift => {
 				// do not advance iterator
 				// finish shift backwards
 				assert!(self.shift < 0, "we are in delete mode");

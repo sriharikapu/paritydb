@@ -64,7 +64,7 @@ pub enum Decision<'o, 'db> {
 	ShiftOccupiedSpace {
 		data: &'db [u8],
 	},
-	FinishDeletedSpace
+	FinishBackwardShift
 }
 
 /// Compares occupied space data and operation key.
@@ -121,7 +121,7 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, shift: isi
 				space_len: space.len,
 			}
 		} else {
-			Decision::FinishDeletedSpace
+			Decision::FinishBackwardShift
 		},
 		(Operation::Insert(_, _), Space::Empty(space), Shift::Forward) => Decision::ConsumeEmptySpace {
 			len: space.len,
@@ -134,7 +134,7 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, shift: isi
 						data: space.data,
 					}
 				} else {
-					Decision::FinishDeletedSpace
+					Decision::FinishBackwardShift
 				},
 				(cmp::Ordering::Less, Shift::Forward) => Decision::ShiftOccupiedSpace {
 					data: space.data,
@@ -152,7 +152,7 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, shift: isi
 						offset: space.offset,
 					}
 				} else {
-					Decision::FinishDeletedSpace
+					Decision::FinishBackwardShift
 				},
 				(cmp::Ordering::Greater, Shift::None) | (cmp::Ordering::Greater , Shift::Forward) => Decision::InsertOperationBeforeOccupiedSpace {
 					key,
@@ -174,7 +174,7 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, shift: isi
 						data: space.data,
 					}
 				} else {
-					Decision::FinishDeletedSpace
+					Decision::FinishBackwardShift
 				},
 				(cmp::Ordering::Less, Shift::Forward) => Decision::ShiftOccupiedSpace {
 					data: space.data,
