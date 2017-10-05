@@ -5,7 +5,7 @@ use std::iter::Peekable;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 use error::Result;
-use flush::decision::{decision, Decision, is_min_offset_for_shift};
+use flush::decision::{decision, Decision, is_min_offset_for_space};
 use key::Key;
 use metadata::Metadata;
 use record::{append_record};
@@ -118,7 +118,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 					self.shift = 0;
 				},
 				Space::Occupied(space) => {
-					if is_min_offset_for_shift(space.offset, self.shift, space.data, self.prefix_bits, self.field_body_size) {
+					if is_min_offset_for_space(space.offset, self.shift, space.data, self.prefix_bits, self.field_body_size) {
 						self.buffer.as_raw_mut().extend_from_slice(space.data);
 					} else {
 						write_empty_bytes(self.buffer.as_raw_mut(), (-self.shift) as usize);
@@ -152,6 +152,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 
 		let space = self.spaces.peek().expect("TODO: db end?")?;
 		let d = decision(operation, space, self.shift, self.field_body_size, self.prefix_bits);
+		println!("d: {:?}", d);
 		match d {
 			Decision::InsertOperationIntoEmptySpace { key, value, offset, space_len } => {
 				// advance iterators

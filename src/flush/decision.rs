@@ -12,6 +12,8 @@ use space::Space;
 use transaction::Operation;
 
 /// Decision made after comparing existing record and new operation.
+///
+/// `'o` is a timelife of flush file, whereas, `'db` is a timelife of database.
 #[derive(Debug)]
 pub enum Decision<'o, 'db> {
 	/// Returned when operation is an insert operation and the space is empty
@@ -23,10 +25,6 @@ pub enum Decision<'o, 'db> {
 	},
 	/// Returned when operation is an insert operation and it's key is lower
 	/// then existing record's key
-	///
-	/// Operation should be marked as inserted.
-	/// Operations iterator should be moved to the next value.
-	/// Spaces iterator offset should be moved to the next operation location.
 	InsertOperationBeforeOccupiedSpace {
 		key: &'o [u8],
 		value: &'o [u8],
@@ -42,16 +40,12 @@ pub enum Decision<'o, 'db> {
 	},
 	/// Returns when operation is a delete operation and it's key is equal
 	/// to existing record's key.
-	///
-	/// The record should be marked as deleted.
 	DeleteOperation {
 		offset: usize,
 		len: usize,
 	},
 	/// Space is occupied and existing record's key is greater then operation's key.
 	/// No decision could be made.
-	///
-	/// If it's occupied space, it should be appended to current idempotent operation.
 	SeekSpace,
 	/// Returned only on delete, when deleted value is not found in the database.
 	///
@@ -74,7 +68,7 @@ fn compare_space_and_operation(space: &[u8], key: &[u8], field_body_size: usize)
 }
 
 #[inline]
-pub fn is_min_offset_for_insert(offset: usize, shift: isize, key: &[u8], prefix_bits: u8, field_body_size: usize) -> bool {
+pub fn is_min_offset_for_key(offset: usize, shift: isize, key: &[u8], prefix_bits: u8, field_body_size: usize) -> bool {
 	let offset = offset - (-shift) as usize;
 	let prefixed_key = Key::new(key, prefix_bits);
 	let min_offset = prefixed_key.offset(field_body_size);
@@ -82,12 +76,12 @@ pub fn is_min_offset_for_insert(offset: usize, shift: isize, key: &[u8], prefix_
 }
 
 #[inline]
-pub fn is_min_offset_for_shift(offset: usize, shift: isize, data: &[u8], prefix_bits: u8, field_body_size: usize) -> bool {
+pub fn is_min_offset_for_space(offset: usize, shift: isize, data: &[u8], prefix_bits: u8, field_body_size: usize) -> bool {
 	let key_prefix_len = (prefix_bits as usize + 7) / 8;
 	let view = Record::extract_key(data, field_body_size, key_prefix_len);
 	let mut prefix = [0u8; 4];
 	view.copy_to_slice(&mut prefix[..key_prefix_len]);
-	is_min_offset_for_insert(offset, shift, &prefix, prefix_bits, field_body_size)
+	is_min_offset_for_key(offset, shift, &prefix, prefix_bits, field_body_size)
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -116,7 +110,7 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, shift: isi
 			offset: space.offset,
 			space_len: space.len,
 		},
-		(Operation::Insert(key, value), Space::Empty(space), Shift::Backward) => if is_min_offset_for_insert(space.offset, shift, key, prefix_bits, field_body_size) {
+		(Operation::Insert(key, value), Space::Empty(space), Shift::Backward) => if is_min_offset_for_key(space.offset, shift, key, prefix_bits, field_body_size) {
 			Decision::InsertOperationIntoEmptySpace {
 				key,
 				value,
@@ -132,7 +126,7 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, shift: isi
 		(Operation::Insert(key, value), Space::Occupied(space), _) => {
 			match (compare_space_and_operation(space.data, key, field_body_size), tip) {
 				(cmp::Ordering::Less, Shift::None) => Decision::SeekSpace,
-				(cmp::Ordering::Less, Shift::Backward) => if is_min_offset_for_shift(space.offset, shift, space.data, prefix_bits, field_body_size) {
+				(cmp::Ordering::Less, Shift::Backward) => if is_min_offset_for_space(space.offset, shift, space.data, prefix_bits, field_body_size) {
 					Decision::ShiftOccupiedSpace {
 						data: space.data,
 					}
@@ -148,7 +142,7 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, shift: isi
 					offset: space.offset,
 					old_len: space.data.len()
 				},
-				(cmp::Ordering::Greater, Shift::Backward) => if is_min_offset_for_insert(space.offset, shift, key, prefix_bits, field_body_size) {
+				(cmp::Ordering::Greater, Shift::Backward) => if is_min_offset_for_key(space.offset, shift, key, prefix_bits, field_body_size) {
 					Decision::InsertOperationBeforeOccupiedSpace {
 						key,
 						value,
@@ -166,13 +160,20 @@ pub fn decision<'o, 'db>(operation: Operation<'o>, space: Space<'db>, shift: isi
 		},
 		// record does not exist
 		(Operation::Delete(_), Space::Empty(_), Shift::None) => Decision::IgnoreOperation,
-		(Operation::Delete(_), Space::Empty(space), _) => Decision::ConsumeEmptySpace {
+		(Operation::Delete(_), Space::Empty(space), Shift::Forward) => Decision::ConsumeEmptySpace {
 			len: space.len,
+		},
+		(Operation::Delete(key), Space::Empty(space), Shift::Backward) => if is_min_offset_for_key(space.offset, shift, key, prefix_bits, field_body_size) {
+			Decision::ConsumeEmptySpace {
+				len: space.len,
+			}
+		} else {
+			Decision::IgnoreOperation
 		},
 		(Operation::Delete(key), Space::Occupied(space), _) => {
 			match (compare_space_and_operation(space.data, key, field_body_size), tip) {
 				(cmp::Ordering::Less, Shift::None) => Decision::SeekSpace,
-				(cmp::Ordering::Less, Shift::Backward) => if is_min_offset_for_shift(space.offset, shift, space.data, prefix_bits, field_body_size) {
+				(cmp::Ordering::Less, Shift::Backward) => if is_min_offset_for_space(space.offset, shift, space.data, prefix_bits, field_body_size) {
 					Decision::ShiftOccupiedSpace {
 						data: space.data,
 					}

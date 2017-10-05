@@ -226,3 +226,62 @@ db_test!(
 	AssertEqual("bbc", "007"),
 	AssertEqual("ccc", "005")
 );
+
+db_test!(
+	db_delete_forward_consumes_space1,
+	Insert("aaa", "001"),
+	Delete("aab"),
+	Delete("bbb"),
+	Insert("bbc", "002"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertEqual("bbc", "002"),
+	AssertNone("aab"),
+	AssertNone("bbb")
+);
+
+db_test!(
+	db_delete_backward_consumes_space1,
+	Insert("aaa", "001"),
+	Insert("bbb", "002"),
+	CommitAndFlush,
+	Delete("bbb"),
+	Delete("ccc"),
+	Insert("ddd", "003"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertNone("bbb"),
+	AssertNone("ccc"),
+	AssertEqual("ddd", "003")
+);
+
+db_test!(
+	db_delete_backward_consumes_space2,
+	Insert("aaa", "001"),
+	Insert("ccc", "002"),
+	CommitAndFlush,
+	Delete("bbb"),
+	Delete("ccc"),
+	Insert("ddd", "003"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertNone("bbb"),
+	AssertNone("ccc"),
+	AssertEqual("ddd", "003")
+);
+
+db_test!(
+	db_delete_backward_consumes_space3,
+	Insert("aaa", "001"),
+	Insert("ddd", "002"),
+	CommitAndFlush,
+	Delete("bbb"),
+	Delete("ddd"),
+	Insert("fff", "003"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertNone("bbb"),
+	AssertNone("ccc"),
+	AssertNone("ddd"),
+	AssertEqual("fff", "003")
+);
