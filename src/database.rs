@@ -175,7 +175,10 @@ impl Database {
 		let data = unsafe { &self.mmap.as_slice()[offset..] };
 
 		match find::find_record(data, field_body_size, value_size, key.key)? {
-			find::RecordResult::Found(record) => Ok(Some(Value::Record(record))),
+			find::RecordResult::Found(record) => match record.value_raw_slice() {
+				Some(raw) => Ok(Some(Value::Raw(raw))),
+				None => Ok(Some(Value::Record(record))),
+			},
 			find::RecordResult::NotFound => Ok(None),
 			find::RecordResult::OutOfRange => unimplemented!(),
 		}
