@@ -30,7 +30,7 @@ pub enum Decision<'o, 'db> {
 		value: &'o [u8],
 		offset: usize,
 	},
-	/// Returns when operation is an insert operation and it's key is equal
+	/// Returned when operation is an insert operation and it's key is equal
 	/// to existing record's key.
 	OverwriteOperation {
 		key: &'o [u8],
@@ -38,7 +38,7 @@ pub enum Decision<'o, 'db> {
 		offset: usize,
 		old_len: usize,
 	},
-	/// Returns when operation is a delete operation and it's key is equal
+	/// Returned when operation is a delete operation and it's key is equal
 	/// to existing record's key.
 	DeleteOperation {
 		offset: usize,
@@ -48,16 +48,16 @@ pub enum Decision<'o, 'db> {
 	/// No decision could be made.
 	SeekSpace,
 	/// Returned only on delete, when deleted value is not found in the database.
-	///
-	/// Operations iterator should be moved to the next value.
-	/// Spaces iterator offset should be moved to next operation location.
 	IgnoreOperation,
+	/// Returned when to many spaces have been shifted forward to make a decision.
 	ConsumeEmptySpace {
 		len: usize,
 	},
+	/// Returned when database space should be shifted backward or forward.
 	ShiftOccupiedSpace {
 		data: &'db [u8],
 	},
+	/// Returned when backwards shift should end.
 	FinishBackwardShift
 }
 
