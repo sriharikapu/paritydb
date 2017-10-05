@@ -3,7 +3,7 @@
 
 error_chain! {
 	types {
-		Error, ErrorKind, ResultExt;
+		Error, ErrorKind, ResultExt, Result;
 	}
 
 	errors {

@@ -1,6 +1,6 @@
 use std::cmp;
 
-use field::iterator::FieldIterator;
+use field::iterator::FieldHeaderIterator;
 use field::{Error, Header, HEADER_SIZE};
 use record::{ValueSize, Record};
 
@@ -21,10 +21,11 @@ pub fn find_record<'a>(
 	value_size: ValueSize,
 	key: &[u8],
 ) -> Result<RecordResult<'a>, Error> {
-	let iter = FieldIterator::new(data, field_body_size)?;
+	let iter = FieldHeaderIterator::new(data, field_body_size)?;
 
-	for (index, field) in iter.enumerate() {
-		match field.header()? {
+	for (index, header) in iter.enumerate() {
+		let header = header?;
+		match header {
 			Header::Uninitialized => return Ok(RecordResult::NotFound),
 			Header::Inserted => {
 				let offset = (field_body_size + HEADER_SIZE) * index;

@@ -2,7 +2,7 @@
 
 use error::{ErrorKind, Result};
 use field::{self, field_size, Header};
-use field::iterator::FieldIterator;
+use field::iterator::FieldHeaderIterator;
 
 macro_rules! try_next {
 	($t: expr) => {
@@ -77,9 +77,9 @@ impl<'a> Iterator for SpaceIterator<'a> {
 		let mut first_header = None;
 		let mut start = self.offset;
 		let field_size = field_size(self.field_body_size);
-		let mut inner = try_next!(FieldIterator::new(&self.data[self.offset..], self.field_body_size));
-		while let Some(field) = inner.next() {
-			let header = try_next!(field.header());
+		let mut inner = try_next!(FieldHeaderIterator::new(&self.data[self.offset..], self.field_body_size));
+		while let Some(header) = inner.next() {
+			let header = try_next!(header);
 			match header {
 				Header::Continued => match first_header {
 					// ommit continued fields at the beginning

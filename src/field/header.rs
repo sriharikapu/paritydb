@@ -1,3 +1,5 @@
+use field::error::{Result, ErrorKind};
+
 pub const HEADER_SIZE: usize = 1;
 
 /// `Header` is a first byte of database field.
@@ -17,13 +19,25 @@ impl Header {
 	const INSERTED: u8 = 1;
 	const CONTINUED: u8 = 2;
 
-	/// Converts `Header` from u8
-	pub fn from_u8(byte: u8) -> Option<Header> {
+	/// Converts `u8` into Header.
+	pub fn from_u8(byte: u8) -> Result<Header> {
 		match byte {
-			Self::UNINITIALIZED => Some(Header::Uninitialized),
-			Self::INSERTED => Some(Header::Inserted),
-			Self::CONTINUED => Some(Header::Continued),
-			_ => None,
+			Self::UNINITIALIZED => Ok(Header::Uninitialized),
+			Self::INSERTED => Ok(Header::Inserted),
+			Self::CONTINUED => Ok(Header::Continued),
+			_ => Err(ErrorKind::InvalidHeader.into()),
 		}
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::Header;
+
+	#[test]
+	fn test_from_u8() {
+		assert_eq!(Header::Uninitialized, Header::from_u8(Header::Uninitialized as u8).unwrap());
+		assert_eq!(Header::Inserted, Header::from_u8(Header::Inserted as u8).unwrap());
+		assert_eq!(Header::Continued, Header::from_u8(Header::Continued as u8).unwrap());
 	}
 }
