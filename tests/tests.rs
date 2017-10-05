@@ -8,8 +8,7 @@ use paritydb::{Database, Options, Transaction, ValuesLen};
 enum Action {
 	Insert(&'static str, &'static str),
 	Delete(&'static str),
-	Commit,
-	Flush(usize),
+	CommitAndFlush,
 	AssertEqual(&'static str, &'static str),
 	AssertNone(&'static str),
 }
@@ -37,12 +36,10 @@ fn run_actions(test_name: &'static str, actions: &[Action]) {
 			Delete(key) => {
 				tx.delete(key)
 			},
-			Commit => {
+			CommitAndFlush => {
 				db.commit(&tx).unwrap();
 				tx = Transaction::default();
-			},
-			Flush(eras) => {
-				db.flush_journal(eras).unwrap();
+				db.flush_journal(1).unwrap();
 			},
 			AssertEqual(key, expected_value) => {
 				assert_eq!(db.get(key).unwrap().unwrap(), expected_value);
@@ -68,14 +65,12 @@ db_test!(
 	Insert("abc", "001"),
 	Insert("abe", "002"),
 	Insert("cde", "003"),
-	Commit,
-	Flush(1),
+	CommitAndFlush,
 	AssertEqual("abc", "001"),
 	AssertEqual("abe", "002"),
 	AssertEqual("cde", "003"),
 	Insert("abd", "004"),
-	Commit,
-	Flush(1),
+	CommitAndFlush,
 	AssertEqual("abc", "001"),
 	AssertEqual("abe", "002"),
 	AssertEqual("abd", "004"),
@@ -83,10 +78,8 @@ db_test!(
 	Insert("abd", "005"),
 	Delete("cde"),
 	Delete("abc"),
-	Commit,
-	Flush(1),
+	CommitAndFlush,
 	AssertNone("abc"),
-	// TODO: shift space
 	AssertEqual("abe", "002"),
 	AssertEqual("abd", "005"),
 	AssertNone("cde")
@@ -96,13 +89,11 @@ db_test!(
 	test_database_flush_shift_only_required1,
 	Insert("aaa", "001"),
 	Insert("bbb", "002"),
-	Commit,
-	Flush(1),
+	CommitAndFlush,
 	AssertEqual("aaa", "001"),
 	AssertEqual("bbb", "002"),
 	Delete("aaa"),
-	Commit,
-	Flush(1),
+	CommitAndFlush,
 	AssertNone("aaa"),
 	AssertEqual("bbb", "002")
 );
@@ -111,15 +102,127 @@ db_test!(
 	test_database_flush_shift_only_required2,
 	Insert("aaa", "001"),
 	Insert("bbb", "002"),
-	Commit,
-	Flush(1),
+	CommitAndFlush,
 	AssertEqual("aaa", "001"),
 	AssertEqual("bbb", "002"),
 	Delete("aaa"),
 	Insert("ccc", "003"),
-	Commit,
-	Flush(1),
+	CommitAndFlush,
 	AssertNone("aaa"),
 	AssertEqual("bbb", "002"),
 	AssertEqual("ccc", "003")
+);
+
+db_test!(
+	test_delete_all1,
+	Insert("aaa", "001"),
+	Insert("bbb", "002"),
+	CommitAndFlush,
+	Delete("aaa"),
+	Delete("bbb"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertNone("bbb")
+);
+
+db_test!(
+	db_insert_db_start,
+	Insert("\x0000", "000"),
+	CommitAndFlush,
+	AssertEqual("\x0000", "000")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place1,
+	Insert("aaa", "001"),
+	CommitAndFlush,
+	Insert("aab", "002"),
+	Delete("aaa"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("aab", "002")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place2,
+	Insert("aab", "001"),
+	CommitAndFlush,
+	Insert("aaa", "002"),
+	Delete("aab"),
+	CommitAndFlush,
+	AssertNone("aab"),
+	AssertEqual("aaa", "002")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place3,
+	Insert("aaa", "001"),
+	CommitAndFlush,
+	Insert("aab", "002"),
+	Delete("aaa"),
+	Insert("bbb", "003"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("aab", "002"),
+	AssertEqual("bbb", "003")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place4,
+	Insert("aaa", "001"),
+	Insert("bbb", "003"),
+	CommitAndFlush,
+	Insert("aab", "002"),
+	Delete("aaa"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("aab", "002"),
+	AssertEqual("bbb", "003")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place5,
+	Insert("aab", "001"),
+	CommitAndFlush,
+	Insert("aaa", "002"),
+	Delete("aab"),
+	Insert("bbb", "003"),
+	CommitAndFlush,
+	AssertNone("aab"),
+	AssertEqual("aaa", "002"),
+	AssertEqual("bbb", "003")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place6,
+	Insert("aab", "001"),
+	Insert("bbb", "003"),
+	CommitAndFlush,
+	Insert("aaa", "002"),
+	Delete("aab"),
+	CommitAndFlush,
+	AssertNone("aab"),
+	AssertEqual("aaa", "002"),
+	AssertEqual("bbb", "003")
+);
+
+db_test!(
+	db_delete_and_insert_after1,
+	Insert("aaa", "001"),
+	Insert("aab", "002"),
+	Insert("aac", "003"),
+	Insert("bbb", "004"),
+	Insert("ccc", "005"),
+	CommitAndFlush,
+	Delete("aaa"),
+	Delete("aac"),
+	Insert("bbb", "006"),
+	Insert("bbc", "007"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("aab", "002"),
+	AssertNone("aac"),
+	AssertEqual("bbb", "006"),
+	AssertEqual("bbc", "007"),
+	AssertEqual("ccc", "005")
 );
