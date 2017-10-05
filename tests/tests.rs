@@ -87,7 +87,7 @@ db_test!(
 	Flush(1),
 	AssertNone("abc"),
 	// TODO: shift space
-	//AssertEqual("abe", "002"),
+	AssertEqual("abe", "002"),
 	AssertEqual("abd", "005"),
 	AssertNone("cde")
 );

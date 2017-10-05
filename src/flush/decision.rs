@@ -82,9 +82,12 @@ pub fn is_min_offset_for_insert(offset: usize, shift: isize, key: &[u8], prefix_
 }
 
 #[inline]
-pub fn is_min_offset_for_shift(_offset: usize, _shift: isize, _data: &[u8], _prefix_bits: u8, _field_body_size: usize) -> bool {
-	// TODO: get desired offset from data and compare it with offset - shift
-	false
+pub fn is_min_offset_for_shift(offset: usize, shift: isize, data: &[u8], prefix_bits: u8, field_body_size: usize) -> bool {
+	let key_prefix_len = (prefix_bits as usize + 7) / 8;
+	let view = Record::extract_key(data, field_body_size, key_prefix_len);
+	let mut prefix = [0u8; 4];
+	view.copy_to_slice(&mut prefix[..key_prefix_len]);
+	is_min_offset_for_insert(offset, shift, &prefix, prefix_bits, field_body_size)
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
