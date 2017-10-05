@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::{PathBuf, Path};
-use std::{cmp, fs, mem};
+use std::{cmp, fs};
 
 use memmap::{Mmap, Protection};
 

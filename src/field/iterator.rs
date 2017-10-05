@@ -1,6 +1,6 @@
 use field::error::{Error, ErrorKind};
 use field::field_size;
-use field::header::{Header, HEADER_SIZE};
+use field::header::Header;
 
 pub struct Field<'a> {
 	data: &'a [u8],
@@ -21,22 +21,6 @@ impl<'a> Field<'a> {
 		}
 
 		Ok(Header::from_u8(self.data[0]).ok_or(ErrorKind::InvalidHeader)?)
-	}
-
-	#[inline]
-	pub fn is_empty(&self) -> Result<bool, Error> {
-		match self.header()? {
-			Header::Uninitialized => Ok(true),
-			_ => Ok(false),
-		}
-	}
-
-	pub fn body(&self) -> Result<&'a [u8], Error> {
-		if self.data.is_empty() {
-			return Err(ErrorKind::InvalidLength.into());
-		}
-
-		Ok(&self.data[HEADER_SIZE..])
 	}
 }
 

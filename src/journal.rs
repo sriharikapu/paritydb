@@ -136,16 +136,6 @@ impl JournalEra {
 		}
 	}
 
-	/// Returns number of eras currently in journal.
-	pub fn len(&self) -> usize {
-		self.cache.len()
-	}
-
-	/// Returns true if this Journal doesn't have any eras inside.
-	pub fn is_empty(&self) -> bool {
-		self.cache.is_empty()
-	}
-
 	/// Returns an iterator over era entries
 	pub fn iter(&self) -> btree_set::IntoIter<Operation> {
 		unsafe { OperationsIterator::new(&self.mmap.as_slice()[CHECKSUM_SIZE..]) }

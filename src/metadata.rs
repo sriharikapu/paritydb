@@ -19,15 +19,6 @@ pub struct Metadata {
 impl Metadata {
 	pub const DB_VERSION: u16 = 0;
 
-	/// Create empty `Metadata`
-	pub fn new(prefix_bits: u8) -> Self {
-		Metadata {
-			db_version: Self::DB_VERSION,
-			occupied_bytes: 0,
-			prefixes: PrefixTree::new(prefix_bits),
-		}
-	}
-
 	/// Notify that record was inserted.
 	pub fn insert_record(&mut self, prefix: u32, len: usize) {
 		self.occupied_bytes += len as u64;
@@ -35,11 +26,11 @@ impl Metadata {
 	}
 
 	/// Notify that record was removed.
-	pub fn remove_record(&mut self, prefix: u32, len: usize) {
+	///
+	/// We can't simply remove prefix from db, cause there might be
+	/// more records with the same prefix in the database.
+	pub fn remove_record(&mut self, len: usize) {
 		self.occupied_bytes -= len as u64;
-		// TODO: we can't simply remove prefix from db, cause there might be
-		// more records with the same prefix in the database
-		//self.prefixes.remove(prefix);
 	}
 
 	/// Notify that record was overwritten.

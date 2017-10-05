@@ -54,11 +54,6 @@ impl OperationBuffer {
 			LittleEndian::write_u32(&mut self.inner[operation_start + 8..operation_start + 12], len as u32);
 		}
 	}
-
-	#[inline]
-	fn is_finished(&self) -> bool {
-		self.denoted_operation_start.is_none()
-	}
 }
 
 enum OperationWriterStep {
@@ -118,7 +113,7 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 		while self.shift < 0 {
 			let space = self.spaces.next().expect("TODO: db end")?;
 			match space {
-				Space::Empty(space) => {
+				Space::Empty(_) => {
 					write_empty_bytes(self.buffer.as_raw_mut(), (-self.shift) as usize);
 					self.shift = 0;
 				},
@@ -157,7 +152,6 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 
 		let space = self.spaces.peek().expect("TODO: db end?")?;
 		let d = decision(operation, space, self.shift, self.field_body_size, self.prefix_bits);
-		println!("d: {:?}", d);
 		match d {
 			Decision::InsertOperationIntoEmptySpace { key, value, offset, space_len } => {
 				// advance iterators
@@ -227,10 +221,11 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 				// denote operation start
 				self.buffer.denote_operation_start(offset as u64);
 				self.shift -= len as isize;
+				// update metadata
+				self.metadata.remove_record(len);
 			},
 		}
 
-		println!("shift: {}", self.shift);
 		Ok(OperationWriterStep::Stepped)
 	}
 
