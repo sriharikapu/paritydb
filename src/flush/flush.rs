@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::{mem, fs};
 
@@ -73,7 +73,12 @@ impl Flush {
 	/// Open flush file if it exists. It it does not, returns None.
 	pub fn open<P: AsRef<Path>>(dir: P, prefix_bits: u8) -> Result<Option<Flush>> {
 		let path = dir.as_ref().join(Self::FILE_NAME);
-		let mmap = Mmap::open_path(&path, Protection::Read)?;
+		let mmap = match Mmap::open_path(&path, Protection::Read) {
+			Ok(mmap) => mmap,
+			Err(ref err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+			Err(err) => return Err(err.into()),
+		};
+
 		{
 			let checksum = unsafe { &mmap.as_slice()[..Self::CHECKSUM_SIZE] };
 			let data = unsafe { &mmap.as_slice()[Self::CHECKSUM_SIZE..] };
