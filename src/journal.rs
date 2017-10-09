@@ -1,5 +1,5 @@
 use std::collections::vec_deque::Drain;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque, btree_set};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
@@ -136,19 +136,11 @@ impl JournalEra {
 		}
 	}
 
-	/// Returns number of eras currently in journal.
-	pub fn len(&self) -> usize {
-		self.cache.len()
-	}
-
-	/// Returns true if this Journal doesn't have any eras inside.
-	pub fn is_empty(&self) -> bool {
-		self.cache.is_empty()
-	}
-
 	/// Returns an iterator over era entries
-	pub fn iter(&self) -> OperationsIterator {
+	pub fn iter(&self) -> btree_set::IntoIter<Operation> {
 		unsafe { OperationsIterator::new(&self.mmap.as_slice()[CHECKSUM_SIZE..]) }
+			.collect::<BTreeSet<_>>()
+			.into_iter()
 	}
 
 	/// Deletes underlying file
@@ -340,7 +332,7 @@ mod tests {
 		// Try to open era
 		assert_eq!(JournalEra::open(&path).unwrap_err().kind(), &ErrorKind::CorruptedJournal(
 			path,
-			"Expected: [b5 14 31 d0 7d c8 57 22 19 5a d8 7e a7 88 da 5d 9d 3d 15 46 55 3a 8f 89 15 f0 91 b1 52 98 a7 3c], Got: [1 2 3 d0 7d c8 57 22 19 5a d8 7e a7 88 da 5d 9d 3d 15 46 55 3a 8f 89 15 f0 91 b1 52 98 a7 3c]".into()
+			"Expected: [56 63 c1 ca 5a 6d 4e d2 b1 e9 70 87 64 79 c2 7c 67 42 44 52 52 37 78 c5 6b 7a 8a 89 e5 de f1 3a], Got: [1 2 3 ca 5a 6d 4e d2 b1 e9 70 87 64 79 c2 7c 67 42 44 52 52 37 78 c5 6b 7a 8a 89 e5 de f1 3a]".into()
 		));
 	}
 }

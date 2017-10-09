@@ -6,34 +6,20 @@
 //!
 //! - with blazingly fast reads
 //!
+//! - and blazingly fast iteration by record's key
+//!
 //! - not so fast inserts
 //!
 //! - neither deletes
 //!
 //! - guaranteed ACID (atomicity, consistency, isolation and durability)
 //!
-//! Each record is stored in database as a header and body.
+//! Each record consists of key, value and optionally value len.
 //!
 //! ```text
-//!  header    body
-//!   /         /
-//! |...|...........|
-//! ```
-//!
-//! A header's length is either 0 or 4 bytes.
-//!
-//! ```text
-//!  operation  body_length (optional)
-//!   /          /
-//! |...|...........|
-//! ```
-//!
-//! A body fields always consists of the key and the value
-//!
-//! ```text
-//!  key      value
-//!   /         /
-//! |...|...........|
+//!  key  (value_len)  value
+//!   /   /          /
+//! |...|...|...........|
 //! ```
 //!
 //! The database consist of array of contant-size fields.
@@ -46,7 +32,7 @@
 //!  1234 1235 1236 1237 1238 1239
 //! ```
 //!
-//! Each field also has it's header and body.
+//! Each field has it's own header and body.
 //!
 //! ```text
 //!  header    body
@@ -60,12 +46,9 @@
 //! 0 - uninitialized
 //! 1 - insert
 //! 2 - continuation of the record
-//! 3 - deleted record (the field can be reused)
 //! ```
 //!
 //! The index of the field for a record is determined using the first X bytes of the key.
-//! If the field is already occupied we iterate over next fields until we find an empty one,
-//! which has enough consecutive fields to store the record.
 
 #![warn(missing_docs)]
 
@@ -76,7 +59,6 @@ extern crate error_chain;
 extern crate hex_slice;
 extern crate memmap;
 extern crate parking_lot;
-extern crate rayon;
 extern crate tiny_keccak;
 
 mod database;

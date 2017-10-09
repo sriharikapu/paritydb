@@ -1,43 +1,28 @@
 //! Flush operations writer
 
-use std::cmp;
 use std::iter::Peekable;
 
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 use error::Result;
+use flush::decision::{decision, Decision, is_min_offset_for_space};
 use key::Key;
 use metadata::Metadata;
-use record::{append_record, Record};
-use space::{SpaceIterator, Space, EmptySpace, OccupiedSpace};
+use record::{append_record};
+use space::{SpaceIterator, Space};
 use transaction::Operation;
 
-struct InsertOperation<'a> {
-	key: Key<'a>,
-	value: &'a [u8],
+#[inline]
+fn write_insert_operation(buffer: &mut Vec<u8>, key: &[u8], value: &[u8], field_body_size: usize, const_value: bool) -> usize {
+	let buffer_len = buffer.len();
+	append_record(buffer, key, value, field_body_size, const_value);
+	buffer.len() - buffer_len
 }
 
-impl<'a> InsertOperation<'a> {
-	fn write(&self, buffer: &mut Vec<u8>, field_body_size: usize, const_value: bool) -> usize {
-		let buffer_len = buffer.len();
-		append_record(buffer, self.key.key, self.value, field_body_size, const_value);
-		buffer.len() - buffer_len
-	}
-
-	fn len(&self) -> usize {
-		self.key.key.len() + self.value.len()
-	}
-}
-
-struct DeleteOperation<'a> {
-	key: Key<'a>,
-	len: usize,
-}
-
-impl<'a> DeleteOperation<'a> {
-	fn write(&self, buffer: &mut Vec<u8>, field_body_size: usize) -> usize {
-		unimplemented!();
-	}
+#[inline]
+fn write_empty_bytes(buffer: &mut Vec<u8>, len: usize) {
+	let buffer_len = buffer.len();
+	buffer.resize(buffer_len + len, 0);
 }
 
 #[derive(Debug, PartialEq, Default)]
@@ -54,11 +39,12 @@ impl OperationBuffer {
 
 	#[inline]
 	fn denote_operation_start(&mut self, offset: u64) {
-		assert!(self.denoted_operation_start.is_none(), "OperationWriter entered incorrect state");
-		self.denoted_operation_start = Some(self.inner.len());
-		self.inner.write_u64::<LittleEndian>(offset).unwrap();
-		// reserve space for len
-		self.inner.extend_from_slice(&[0; 4]);
+		if self.denoted_operation_start.is_none() {
+			self.denoted_operation_start = Some(self.inner.len());
+			self.inner.write_u64::<LittleEndian>(offset).unwrap();
+			// reserve space for len
+			self.inner.extend_from_slice(&[0; 4]);
+		}
 	}
 
 	#[inline]
@@ -70,25 +56,13 @@ impl OperationBuffer {
 	}
 }
 
-enum OperationWriterState<'op, 'db> {
-	ConsumeNextOperation,
-	InsertOperation(InsertOperation<'op>, usize),
-	OverwriteOperation(InsertOperation<'op>, usize, usize),
-	DeleteOperation(DeleteOperation<'op>, usize),
-	Advance(usize),
-	EmptySpace(EmptySpace, usize),
-	OccupiedSpace(OccupiedSpace<'db>, usize),
-	Finished,
-}
-
 enum OperationWriterStep {
 	Stepped,
 	Finished
 }
 
 /// Writes transactions as a set of idempotent operations
-pub struct OperationWriter<'op, 'db, I: Iterator> {
-	state: OperationWriterState<'op, 'db>,
+pub struct OperationWriter<'db, I: Iterator> {
 	operations: Peekable<I>,
 	spaces: SpaceIterator<'db>,
 	metadata: &'db mut Metadata,
@@ -96,9 +70,13 @@ pub struct OperationWriter<'op, 'db, I: Iterator> {
 	field_body_size: usize,
 	prefix_bits: u8,
 	const_value: bool,
+	/// shift is always increased or decreased by a len of inserted/deleted
+	/// record or an empty field. inserted and deleted records are always
+	/// aligned by function append_record from src/record/append.rs.
+	shift: isize,
 }
 
-impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> {
+impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 	/// Creates new operations writer. All operations needs to be ordered by key.
 	pub fn new(
 		operations: I,
@@ -109,7 +87,6 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 		const_value: bool,
 	) -> Self {
 		OperationWriter {
-			state: OperationWriterState::ConsumeNextOperation,
 			operations: operations.peekable(),
 			spaces: SpaceIterator::new(database, field_body_size, 0),
 			metadata,
@@ -117,180 +94,141 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'op, 'db, I> 
 			field_body_size,
 			prefix_bits,
 			const_value,
+			shift: 0,
 		}
 	}
 
+	fn last_step(&mut self) -> Result<()> {
+		// loop until the transaction is finished
+		while self.shift > 0 {
+			let space = self.spaces.next().expect("TODO: db end")?;
+			match space {
+				Space::Empty(space) => {
+					self.shift -= space.len as isize;
+				},
+				Space::Occupied(space) => {
+					// write it to a buffer if we are in 'rewrite' state
+					self.buffer.as_raw_mut().extend_from_slice(space.data);
+				},
+			}
+		}
+
+		while self.shift < 0 {
+			let space = self.spaces.next().expect("TODO: db end")?;
+			match space {
+				Space::Empty(_) => {
+					write_empty_bytes(self.buffer.as_raw_mut(), (-self.shift) as usize);
+					self.shift = 0;
+				},
+				Space::Occupied(space) => {
+					if is_min_offset_for_space(space.offset, self.shift, space.data, self.prefix_bits, self.field_body_size) {
+						self.buffer.as_raw_mut().extend_from_slice(space.data);
+					} else {
+						write_empty_bytes(self.buffer.as_raw_mut(), (-self.shift) as usize);
+						self.shift = 0;
+					}
+				},
+			}
+		}
+
+		// write the len of previous operation
+		self.buffer.finish_operation();
+		Ok(())
+	}
+
 	fn step(&mut self) -> Result<OperationWriterStep> {
-		let next_state = match self.state {
-			OperationWriterState::ConsumeNextOperation => {
-				// write the len of previous operation
-				self.buffer.finish_operation();
-
-				// get next operation
-				match self.operations.next() {
-					// if there is no operation, finish
-					None => OperationWriterState::Finished,
-					Some(operation) => match operation {
-						// if it's insert, peek and move to space offset until you find insertion place
-						Operation::Insert(k, value) => {
-							let key = Key::new(k, self.prefix_bits);
-							self.spaces.move_offset_forward(key.offset(self.field_body_size));
-
-							let (offset, previous_size) = loop {
-								let space = self.spaces.peek().expect("TODO: db end")?;
-
-								match space {
-									Space::Empty(ref space) => {
-										break (space.offset, None);
-									},
-									Space::Occupied(ref space) => {
-										match Record::extract_key(&space.data, self.field_body_size, k.len()).partial_cmp(&k).unwrap() {
-											cmp::Ordering::Less => {
-												// seek
-												let _ = self.spaces.next();
-											},
-											cmp::Ordering::Equal => {
-												// overwrite
-												let _ = self.spaces.next();
-												// TODO: handle edge case when new record len != old record len
-												let previous_len = k.len() + value.len();
-												break (space.offset, Some(previous_len));
-											},
-											cmp::Ordering::Greater => {
-												// insert then write old record
-												break (space.offset, None);
-											}
-										}
-									}
-								}
-							};
-
-							// write previous operation start
-							self.buffer.denote_operation_start(offset as u64);
-
-							let insert = InsertOperation {
-								key,
-								value,
-							};
-
-							// call insert operation
-							if let Some(size) = previous_size {
-								OperationWriterState::OverwriteOperation(insert, size, 0)
-							} else {
-								OperationWriterState::InsertOperation(insert, 0)
-							}
-						},
-						Operation::Delete(key) => {
-							// if it's delete peek and move to delete place
-							// if not found, move to next operation
-							unimplemented!();
-						},
-					}
-				}
-			},
-			OperationWriterState::InsertOperation(ref operation, len) => {
-				// write next operation to a buffer
-				let written = operation.write(self.buffer.as_raw_mut(), self.field_body_size, self.const_value);
-				// update metadata
-				self.metadata.insert_record(operation.key.prefix, operation.len());
-				// increase the len size by operation size
-				// advance to the next operation
-				OperationWriterState::Advance(len + written)
-			},
-			OperationWriterState::OverwriteOperation(ref operation, previous_size, len) => {
-				// write overwrite operation to a buffer
-				let _ = operation.write(self.buffer.as_raw_mut(), self.field_body_size, self.const_value);
-				// update metadata
-				self.metadata.update_record_len(previous_size, operation.len());
-				// len should not be increased
-				// advance to the next operation
-				OperationWriterState::Advance(len)
-			},
-			OperationWriterState::DeleteOperation(ref operation, len) => {
-				// write to buffer deleted fields
-
-				// update metadata
-				self.metadata.remove_record(operation.key.prefix, operation.len);
-
-				// len should not be increased
-				// advance to the next operation
-				OperationWriterState::Advance(len)
-			},
-			OperationWriterState::Advance(len) => {
-				// peek next space and operation and decide which one should go first
-				let space = self.spaces.peek().expect("TODO: db end")?;
-
-				if len == 0 {
-					OperationWriterState::ConsumeNextOperation
-				} else {
-					match space {
-						Space::Empty(space) => {
-							// remove this space
-							let _ = self.spaces.next();
-							OperationWriterState::EmptySpace(space, len)
-						},
-						Space::Occupied(space) => match self.operations.peek().cloned() {
-							None => {
-								// remove his space
-								let _ = self.spaces.next();
-								OperationWriterState::OccupiedSpace(space, len)
-							},
-							Some(Operation::Insert(key, value)) => {
-								let key = Key::new(key, self.prefix_bits);
-								match Record::extract_key(&space.data, self.field_body_size, key.key.len()).partial_cmp(&key.key).unwrap() {
-									// existing record is smaller
-									cmp::Ordering::Less => {
-										// remove his space
-										let _ = self.spaces.next();
-										OperationWriterState::OccupiedSpace(space, len)
-									}
-									// replace records
-									cmp::Ordering::Equal => {
-										let _ = self.spaces.next();
-										let _ = self.operations.next();
-										let insert = InsertOperation {
-											key,
-											value,
-										};
-										// TODO: handle edge case when new record len != old record len
-										let previous_len = insert.len();
-										OperationWriterState::OverwriteOperation(insert, previous_len, len)
-									},
-									// existing record is greater, insert new record first
-									cmp::Ordering::Greater => {
-										let _ = self.operations.next();
-										let insert = InsertOperation {
-											key,
-											value,
-										};
-										OperationWriterState::InsertOperation(insert, len)
-									},
-								}
-							},
-							Some(Operation::Delete(ref key)) => {
-								// TODO: if delete operation call delete
-								unimplemented!();
-							},
-						}
-					}
-				}
-			},
-			OperationWriterState::EmptySpace(ref mut space, len) => {
-				// advance to the next operation
-				OperationWriterState::Advance(len - space.len)
-			},
-			OperationWriterState::OccupiedSpace(ref mut space, len) => {
-				// write it to a buffer
-				self.buffer.as_raw_mut().extend_from_slice(space.data);
-				// advance to the next operation
-				OperationWriterState::Advance(len)
-			},
-			OperationWriterState::Finished => {
-				return Ok(OperationWriterStep::Finished);
-			},
+		let operation = match self.operations.peek().cloned() {
+			Some(operation) => operation,
+			None => {
+				self.last_step()?;
+				return Ok(OperationWriterStep::Finished)
+			}
 		};
 
-		self.state = next_state;
+		let prefixed_key = Key::new(operation.key(), self.prefix_bits);
+
+		if self.shift == 0 {
+			// write the len of previous operation
+			self.buffer.finish_operation();
+			self.spaces.move_offset_forward(prefixed_key.offset(self.field_body_size));
+		}
+
+		let space = self.spaces.peek().expect("TODO: db end?")?;
+		let d = decision(operation, space, self.shift, self.field_body_size, self.prefix_bits);
+		match d {
+			Decision::InsertOperationIntoEmptySpace { key, value, offset, space_len } => {
+				// advance iterators
+				let _ = self.operations.next();
+				let _ = self.spaces.next();
+
+				// denote operation start
+				self.buffer.denote_operation_start(offset as u64);
+				let written = write_insert_operation(self.buffer.as_raw_mut(), key, value, self.field_body_size, self.const_value);
+				self.shift += written as isize - space_len as isize;
+				// insert metadata
+				self.metadata.insert_record(prefixed_key.prefix, written);
+			},
+			Decision::InsertOperationBeforeOccupiedSpace { key, value, offset } => {
+				// advance iterators
+				let _ = self.operations.next();
+
+				// denote operation start
+				self.buffer.denote_operation_start(offset as u64);
+				let written = write_insert_operation(self.buffer.as_raw_mut(), key, value, self.field_body_size, self.const_value);
+				self.shift += written as isize;
+				// insert metadata
+				self.metadata.insert_record(prefixed_key.prefix, written);
+			},
+			Decision::OverwriteOperation { key, value, offset, old_len } => {
+				// advance iterators
+				let _ = self.operations.next();
+				let _ = self.spaces.next();
+
+				// denote operation start
+				self.buffer.denote_operation_start(offset as u64);
+				let written = write_insert_operation(self.buffer.as_raw_mut(), key, value, self.field_body_size, self.const_value);
+				self.shift += written as isize - old_len as isize;
+				// update metadata
+				self.metadata.update_record_len(old_len, written);
+			},
+			Decision::SeekSpace => {
+				// advance iterator
+				let _ = self.spaces.next();
+			},
+			Decision::IgnoreOperation => {
+				// ignore this operation
+				let _ = self.operations.next();
+			},
+			Decision::ConsumeEmptySpace { len } => {
+				let _ = self.spaces.next();
+				self.shift -= len as isize;
+			},
+			Decision::ShiftOccupiedSpace { data } => {
+				// advance iterators
+				let _ = self.spaces.next();
+				// rewrite the space to a buffer
+				self.buffer.as_raw_mut().extend_from_slice(data);
+			},
+			Decision::FinishBackwardShift => {
+				// do not advance iterator
+				// finish shift backwards
+				assert!(self.shift < 0, "we are in delete mode");
+				write_empty_bytes(self.buffer.as_raw_mut(), (-self.shift) as usize);
+				self.shift = 0;
+			},
+			Decision::DeleteOperation { offset, len } => {
+				// advance operations
+				let _ = self.operations.next();
+				let _ = self.spaces.next();
+
+				// denote operation start
+				self.buffer.denote_operation_start(offset as u64);
+				self.shift -= len as isize;
+				// update metadata
+				self.metadata.remove_record(len);
+			},
+		}
+
 		Ok(OperationWriterStep::Stepped)
 	}
 

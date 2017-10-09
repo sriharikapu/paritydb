@@ -1,24 +1,41 @@
+use std::cmp::Ordering;
 use byteorder::{LittleEndian, ByteOrder, WriteBytesExt};
 
 /// Database operations
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Operation<'a> {
 	Insert(&'a [u8], &'a [u8]),
 	Delete(&'a [u8]),
+}
+
+impl<'a> PartialOrd for Operation<'a> {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		self.key().partial_cmp(other.key())
+	}
+}
+
+impl<'a> Ord for Operation<'a> {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.key().cmp(other.key())
+	}
 }
 
 impl<'a> Operation<'a> {
 	const INSERT: u8 = 0;
 	const DELETE: u8 = 1;
 
-	/// Each operation is stored in a format which duplicates size before and
-	/// after the transaction. Thanks to that, transactions from journal can be
-	/// quickly iterated backwards.
+	pub fn key(&self) -> &'a [u8] {
+		match *self {
+			Operation::Insert(key, _) | Operation::Delete(key) => key,
+		}
+	}
+
+	/// Each operation is stored with a type and size before the transaction.
 	///
 	/// ```text
-	///  1 byte   4/8 bytes       4/8 bytes  1 byte
-	///   /         /                /        /
-	/// | type |  size(s) | data | size(s) | type |
+	///  1 byte   4/8 bytes
+	///   /         /
+	/// | type |  size(s) | data |
 	/// ```
 	fn write_to_buf(&self, buf: &mut Vec<u8>) {
 		match *self {
@@ -28,16 +45,11 @@ impl<'a> Operation<'a> {
 				buf.write_u32::<LittleEndian>(value.len() as u32).unwrap();
 				buf.extend_from_slice(key);
 				buf.extend_from_slice(value);
-				buf.write_u32::<LittleEndian>(key.len() as u32).unwrap();
-				buf.write_u32::<LittleEndian>(value.len() as u32).unwrap();
-				buf.push(Operation::INSERT);
 			},
 			Operation::Delete(key) => {
 				buf.push(Operation::DELETE);
 				buf.write_u32::<LittleEndian>(key.len() as u32).unwrap();
 				buf.extend_from_slice(key);
-				buf.write_u32::<LittleEndian>(key.len() as u32).unwrap();
-				buf.push(Operation::DELETE);
 			},
 		}
 	}
@@ -116,45 +128,14 @@ impl<'a> Iterator for OperationsIterator<'a> {
 				let key_end = 9 + key_len;
 				let value_end = key_end + value_len;
 				let o = Operation::Insert(&self.data[9..key_end], &self.data[key_end..value_end]);
-				self.data = &self.data[value_end + 9..];
+				self.data = &self.data[value_end..];
 				Some(o)
 			},
 			Operation::DELETE => {
 				let key_len = LittleEndian::read_u32(&self.data[1..5]) as usize;
 				let key_end = 5 + key_len;
 				let o = Operation::Delete(&self.data[5..key_end]);
-				self.data = &self.data[key_end + 5..];
-				Some(o)
-			},
-			_ => panic!("Unsupported operation!"),
-		}
-	}
-}
-
-impl<'a> DoubleEndedIterator for OperationsIterator<'a> {
-	fn next_back(&mut self) -> Option<Self::Item> {
-		if self.data.is_empty() {
-			return None;
-		}
-
-		let last = self.data.len() - 1;
-		match self.data[last] {
-			Operation::INSERT => {
-				let key_len = LittleEndian::read_u32(&self.data[last - 8..last - 4]) as usize;
-				let value_len = LittleEndian::read_u32(&self.data[last - 4..last]) as usize;
-				let key_end = last - 8 - value_len;
-				let key_begin = key_end - key_len;
-				let value_end = key_end + value_len;
-				let o = Operation::Insert(&self.data[key_begin..key_end], &self.data[key_end..value_end]);
-				self.data = &self.data[..key_begin - 9];
-				Some(o)
-			},
-			Operation::DELETE => {
-				let key_len = LittleEndian::read_u32(&self.data[last - 4..last]) as usize;
-				let key_end = last - 4;
-				let key_begin = key_end - key_len;
-				let o = Operation::Delete(&self.data[key_begin..key_end]);
-				self.data = &self.data[..key_begin - 5];
+				self.data = &self.data[key_end..];
 				Some(o)
 			},
 			_ => panic!("Unsupported operation!"),
@@ -177,11 +158,5 @@ mod tests {
 		assert_eq!(operations.next(), Some(Operation::Insert(b"key", b"value")));
 		assert_eq!(operations.next(), Some(Operation::Delete(b"key")));
 		assert_eq!(operations.next(), None);
-
-		let mut rev_operations = t.operations().rev();
-
-		assert_eq!(rev_operations.next(), Some(Operation::Delete(b"key")));
-		assert_eq!(rev_operations.next(), Some(Operation::Insert(b"key", b"value")));
-		assert_eq!(rev_operations.next(), None);
 	}
 }

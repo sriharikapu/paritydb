@@ -2,7 +2,7 @@
 
 use error::{ErrorKind, Result};
 use field::{self, field_size, Header};
-use field::iterator::FieldIterator;
+use field::iterator::FieldHeaderIterator;
 
 macro_rules! try_next {
 	($t: expr) => {
@@ -74,68 +74,80 @@ impl<'a> Iterator for SpaceIterator<'a> {
 			return None;
 		}
 
-		let mut prev_header = None;
+		let mut first_header = None;
 		let mut start = self.offset;
 		let field_size = field_size(self.field_body_size);
-		let mut inner = try_next!(FieldIterator::new(&self.data[self.offset..], self.field_body_size));
-		while let Some(field) = inner.next() {
-			let header = try_next!(field.header());
+		let mut inner = try_next!(FieldHeaderIterator::new(&self.data[self.offset..], self.field_body_size));
+		while let Some(header) = inner.next() {
+			let header = try_next!(header);
 			match header {
-				Header::Continued => match prev_header {
+				Header::Continued => match first_header {
 					// ommit continued fields at the beginning
 					None => {
 						start += field_size;
 						self.offset += field_size;
 						continue;
 					},
-					Some(Header::Inserted) | Some(Header::Continued) => {
+					Some(Header::Inserted) => {
 						self.offset += field_size;
 					},
-					Some(Header::Deleted) | Some(Header::Uninitialized) => {
-						return Some(Err(ErrorKind::Field(field::ErrorKind::InvalidHeader).into()))
+					Some(Header::Continued) | Some(Header::Uninitialized) => {
+						unreachable!();
 					},
 				},
-				Header::Inserted => match prev_header {
+				Header::Inserted => match first_header {
 					Some(Header::Inserted) => return Some(Ok(Space::Occupied(OccupiedSpace {
 						offset: start,
 						data: &self.data[start..self.offset],
 					}))),
-					Some(Header::Continued) | None => {
-						self.offset += field_size;
-					}
-					// this one is unreachable
-					Some(Header::Deleted) | Some(Header::Uninitialized) => return Some(Ok(Space::Empty(EmptySpace {
-						offset: start,
-						len: self.offset - start,
-					}))),
-				},
-				Header::Deleted | Header::Uninitialized => match prev_header {
-					// inserted is unreachable
-					Some(Header::Inserted) | Some(Header::Continued) => return Some(Ok(Space::Occupied(OccupiedSpace {
-						offset: start,
-						data: &self.data[start..self.offset],
-					}))),
-					Some(Header::Deleted) | Some(Header::Uninitialized) => return Some(Ok(Space::Empty(EmptySpace {
-						offset: start,
-						len: self.offset - start,
-					}))),
 					None => {
 						self.offset += field_size;
 					},
+					Some(Header::Continued) | Some(Header::Uninitialized) => {
+						unreachable!();
+					},
+				},
+				Header::Uninitialized => match first_header {
+					// inserted is unreachable
+					Some(Header::Inserted) => return Some(Ok(Space::Occupied(OccupiedSpace {
+						offset: start,
+						data: &self.data[start..self.offset],
+					}))),
+					Some(Header::Continued) | Some(Header::Uninitialized) => {
+						unreachable!();
+					},
+					None => {
+						self.offset += field_size;
+						return Some(Ok(Space::Empty(EmptySpace {
+							offset: start,
+							len: self.offset - start,
+						})))
+					},
 				}
 			}
-			prev_header = Some(header);
+
+			if first_header.is_none() && header != Header::Continued {
+				first_header = Some(header);
+			}
 		}
 
-		prev_header.map(|header| match header {
-			Header::Inserted | Header::Continued => Ok(Space::Occupied(OccupiedSpace {
+		if first_header.is_none() {
+			// continuation was called
+			return Some(Err(ErrorKind::Field(field::ErrorKind::InvalidHeader).into()))
+		}
+
+		first_header.map(|header| match header {
+			Header::Inserted => Ok(Space::Occupied(OccupiedSpace {
 				offset: start,
 				data: &self.data[start..self.offset],
 			})),
-			Header::Deleted | Header::Uninitialized => Ok(Space::Empty(EmptySpace {
+			Header::Uninitialized => Ok(Space::Empty(EmptySpace {
 				offset: start,
 				len: self.offset - start,
 			})),
+			Header::Continued => {
+				unreachable!();
+			},
 		})
 	}
 }
@@ -280,7 +292,27 @@ mod tests {
 		let field_body_size = 3;
 		let offset = 0;
 
+		let first_elem = Space::Empty(EmptySpace { offset, len: 4 });
 		let mut iterator = SpaceIterator::new(data, field_body_size, offset);
+		assert_eq!(first_elem, iterator.next().unwrap().unwrap());
 		assert!(iterator.next().unwrap().is_err());
+	}
+
+	#[test]
+	fn test_space_iterator_short_insert_after_long_insert() {
+		let data = &[
+			1, 0, 0, 0,
+			2, 0, 0, 0,
+			1, 0, 0, 0
+		];
+		let field_body_size = 3;
+		let offset = 0;
+
+		let first_elem = Space::Occupied(OccupiedSpace { offset, data: &data[0..8] });
+		let second_elem = Space::Occupied(OccupiedSpace { offset: 8, data: &data[8..12] });
+		let mut iterator = SpaceIterator::new(data, field_body_size, offset);
+		assert_eq!(first_elem, iterator.next().unwrap().unwrap());
+		assert_eq!(second_elem, iterator.next().unwrap().unwrap());
+		assert!(iterator.next().is_none());
 	}
 }

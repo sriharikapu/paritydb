@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::path::{PathBuf, Path};
-use std::{cmp, fs, mem};
+use std::{cmp, fs};
 
 use memmap::{Mmap, Protection};
 
@@ -175,7 +175,10 @@ impl Database {
 		let data = unsafe { &self.mmap.as_slice()[offset..] };
 
 		match find::find_record(data, field_body_size, value_size, key.key)? {
-			find::RecordResult::Found(record) => Ok(Some(Value::Record(record))),
+			find::RecordResult::Found(record) => match record.value_raw_slice() {
+				Some(raw) => Ok(Some(Value::Raw(raw))),
+				None => Ok(Some(Value::Record(record))),
+			},
 			find::RecordResult::NotFound => Ok(None),
 			find::RecordResult::OutOfRange => unimplemented!(),
 		}
@@ -187,6 +190,7 @@ mod tests {
 	extern crate tempdir;
 
 	use super::{Database, Options};
+	use options::ValuesLen;
 	use error::ErrorKind;
 	use transaction::Transaction;
 
@@ -197,6 +201,7 @@ mod tests {
 		let mut db = Database::create(temp.path(), Options {
 			journal_eras: 0,
 			key_len: 3,
+			value_len: ValuesLen::Constant(3),
 			..Default::default()
 		}).unwrap();
 
@@ -220,11 +225,10 @@ mod tests {
 		assert_eq!(db.get("cde").unwrap(), None); // from DB
 
 		// Flush journal and fetch everything from DB.
-		// TODO [ToDr] Uncomment me.
-		// db.flush_journal(2).unwrap();
+		db.flush_journal(2).unwrap();
 
-		// assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
-		// assert_eq!(db.get("cde").unwrap(), None);
+		assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
+		assert_eq!(db.get("cde").unwrap(), None);
 	}
 
 	#[test]

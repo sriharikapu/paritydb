@@ -4,9 +4,19 @@ extern crate paritydb;
 use tempdir::TempDir;
 use paritydb::{Database, Options, Transaction, ValuesLen};
 
-#[test]
-fn test_database_flush() {
-	let temp = TempDir::new("test_database_open").unwrap();
+#[derive(Debug)]
+enum Action {
+	Insert(&'static str, &'static str),
+	Delete(&'static str),
+	CommitAndFlush,
+	AssertEqual(&'static str, &'static str),
+	AssertNone(&'static str),
+}
+
+use Action::*;
+
+fn run_actions(test_name: &'static str, actions: &[Action]) {
+	let temp = TempDir::new(test_name).unwrap();
 
 	let mut db = Database::create(temp.path(), Options {
 		journal_eras: 0,
@@ -16,31 +26,262 @@ fn test_database_flush() {
 	}).unwrap();
 
 	let mut tx = Transaction::default();
-	tx.insert("abc", "001");
-	tx.insert("abe", "002");
-	tx.insert("cde", "003");
 
-	db.commit(&tx).unwrap();
-	db.flush_journal(1).unwrap();
-
-	assert_eq!(db.get("abc").unwrap().unwrap(), b"001");
-	assert_eq!(db.get("abe").unwrap().unwrap(), b"002");
-	assert_eq!(db.get("cde").unwrap().unwrap(), b"003");
-
-	let mut tx = Transaction::default();
-	tx.insert("abd", "004");
-	db.commit(&tx).unwrap();
-	db.flush_journal(1).unwrap();
-
-	assert_eq!(db.get("abd").unwrap().unwrap(), b"004");
-	assert_eq!(db.get("abc").unwrap().unwrap(), b"001");
-	assert_eq!(db.get("abe").unwrap().unwrap(), b"002");
-	assert_eq!(db.get("cde").unwrap().unwrap(), b"003");
-
-	let mut tx = Transaction::default();
-	tx.insert("abd", "005");
-	db.commit(&tx).unwrap();
-	db.flush_journal(1).unwrap();
-
-	assert_eq!(db.get("abd").unwrap().unwrap(), b"005");
+	for action in actions {
+		println!("action: {:?}", action);
+		match *action {
+			Insert(key, value) => {
+				tx.insert(key, value)
+			},
+			Delete(key) => {
+				tx.delete(key)
+			},
+			CommitAndFlush => {
+				db.commit(&tx).unwrap();
+				tx = Transaction::default();
+				db.flush_journal(1).unwrap();
+			},
+			AssertEqual(key, expected_value) => {
+				assert_eq!(db.get(key).unwrap().unwrap(), expected_value);
+			},
+			AssertNone(key) => {
+				assert_eq!(db.get(key).unwrap(), None);
+			},
+		}
+	}
 }
+
+macro_rules! db_test {
+	($name: tt, $($actions: expr),*) => {
+		#[test]
+		fn $name() {
+			run_actions(stringify!($name), &[$($actions),*]);
+		}
+	}
+}
+
+db_test!(
+	test_database_flush,
+	Insert("abc", "001"),
+	Insert("abe", "002"),
+	Insert("cde", "003"),
+	CommitAndFlush,
+	AssertEqual("abc", "001"),
+	AssertEqual("abe", "002"),
+	AssertEqual("cde", "003"),
+	Insert("abd", "004"),
+	CommitAndFlush,
+	AssertEqual("abc", "001"),
+	AssertEqual("abe", "002"),
+	AssertEqual("abd", "004"),
+	AssertEqual("cde", "003"),
+	Insert("abd", "005"),
+	Delete("cde"),
+	Delete("abc"),
+	CommitAndFlush,
+	AssertNone("abc"),
+	AssertEqual("abe", "002"),
+	AssertEqual("abd", "005"),
+	AssertNone("cde")
+);
+
+db_test!(
+	test_database_flush_shift_only_required1,
+	Insert("aaa", "001"),
+	Insert("bbb", "002"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertEqual("bbb", "002"),
+	Delete("aaa"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("bbb", "002")
+);
+
+db_test!(
+	test_database_flush_shift_only_required2,
+	Insert("aaa", "001"),
+	Insert("bbb", "002"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertEqual("bbb", "002"),
+	Delete("aaa"),
+	Insert("ccc", "003"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("bbb", "002"),
+	AssertEqual("ccc", "003")
+);
+
+db_test!(
+	test_delete_all1,
+	Insert("aaa", "001"),
+	Insert("bbb", "002"),
+	CommitAndFlush,
+	Delete("aaa"),
+	Delete("bbb"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertNone("bbb")
+);
+
+db_test!(
+	db_insert_db_start,
+	Insert("\x0000", "000"),
+	CommitAndFlush,
+	AssertEqual("\x0000", "000")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place1,
+	Insert("aaa", "001"),
+	CommitAndFlush,
+	Insert("aab", "002"),
+	Delete("aaa"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("aab", "002")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place2,
+	Insert("aab", "001"),
+	CommitAndFlush,
+	Insert("aaa", "002"),
+	Delete("aab"),
+	CommitAndFlush,
+	AssertNone("aab"),
+	AssertEqual("aaa", "002")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place3,
+	Insert("aaa", "001"),
+	CommitAndFlush,
+	Insert("aab", "002"),
+	Delete("aaa"),
+	Insert("bbb", "003"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("aab", "002"),
+	AssertEqual("bbb", "003")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place4,
+	Insert("aaa", "001"),
+	Insert("bbb", "003"),
+	CommitAndFlush,
+	Insert("aab", "002"),
+	Delete("aaa"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("aab", "002"),
+	AssertEqual("bbb", "003")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place5,
+	Insert("aab", "001"),
+	CommitAndFlush,
+	Insert("aaa", "002"),
+	Delete("aab"),
+	Insert("bbb", "003"),
+	CommitAndFlush,
+	AssertNone("aab"),
+	AssertEqual("aaa", "002"),
+	AssertEqual("bbb", "003")
+);
+
+db_test!(
+	db_delete_and_insert_in_the_same_place6,
+	Insert("aab", "001"),
+	Insert("bbb", "003"),
+	CommitAndFlush,
+	Insert("aaa", "002"),
+	Delete("aab"),
+	CommitAndFlush,
+	AssertNone("aab"),
+	AssertEqual("aaa", "002"),
+	AssertEqual("bbb", "003")
+);
+
+db_test!(
+	db_delete_and_insert_after1,
+	Insert("aaa", "001"),
+	Insert("aab", "002"),
+	Insert("aac", "003"),
+	Insert("bbb", "004"),
+	Insert("ccc", "005"),
+	CommitAndFlush,
+	Delete("aaa"),
+	Delete("aac"),
+	Insert("bbb", "006"),
+	Insert("bbc", "007"),
+	CommitAndFlush,
+	AssertNone("aaa"),
+	AssertEqual("aab", "002"),
+	AssertNone("aac"),
+	AssertEqual("bbb", "006"),
+	AssertEqual("bbc", "007"),
+	AssertEqual("ccc", "005")
+);
+
+db_test!(
+	db_delete_forward_consumes_space1,
+	Insert("aaa", "001"),
+	Delete("aab"),
+	Delete("bbb"),
+	Insert("bbc", "002"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertEqual("bbc", "002"),
+	AssertNone("aab"),
+	AssertNone("bbb")
+);
+
+db_test!(
+	db_delete_backward_consumes_space1,
+	Insert("aaa", "001"),
+	Insert("bbb", "002"),
+	CommitAndFlush,
+	Delete("bbb"),
+	Delete("ccc"),
+	Insert("ddd", "003"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertNone("bbb"),
+	AssertNone("ccc"),
+	AssertEqual("ddd", "003")
+);
+
+db_test!(
+	db_delete_backward_consumes_space2,
+	Insert("aaa", "001"),
+	Insert("ccc", "002"),
+	CommitAndFlush,
+	Delete("bbb"),
+	Delete("ccc"),
+	Insert("ddd", "003"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertNone("bbb"),
+	AssertNone("ccc"),
+	AssertEqual("ddd", "003")
+);
+
+db_test!(
+	db_delete_backward_consumes_space3,
+	Insert("aaa", "001"),
+	Insert("ddd", "002"),
+	CommitAndFlush,
+	Delete("bbb"),
+	Delete("ddd"),
+	Insert("fff", "003"),
+	CommitAndFlush,
+	AssertEqual("aaa", "001"),
+	AssertNone("bbb"),
+	AssertNone("ccc"),
+	AssertNone("ddd"),
+	AssertEqual("fff", "003")
+);

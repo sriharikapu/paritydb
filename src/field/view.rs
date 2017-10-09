@@ -147,6 +147,21 @@ impl<'a> FieldsView<'a> {
 		}
 	}
 
+	/// Returns underlaying value if it is a continuous slice of memory,
+	/// otherwise returns None.
+	pub fn raw_slice(&self) -> Option<&'a [u8]> {
+		let field_size = field_size(self.field_body_size);
+		let start = self.offset + HEADER_SIZE * self.offset / self.field_body_size + HEADER_SIZE;
+		let end = start + self.len;
+		let start_page = start / field_size;
+		let end_page = (end - 1) / field_size;
+		if start_page == end_page {
+			Some(&self.data[start..end])
+		} else {
+			None
+		}
+	}
+
 	#[inline]
 	pub fn len(&self) -> usize {
 		self.len
@@ -367,5 +382,39 @@ mod tests {
 		assert_eq!(fv.partial_cmp(&[2, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]), Some(cmp::Ordering::Less));
 		assert_eq!(fv.partial_cmp(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12]), Some(cmp::Ordering::Greater));
 		assert_eq!(fv.partial_cmp(&[1, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]), Some(cmp::Ordering::Greater));
+	}
+
+	#[test]
+	fn test_raw_slice1() {
+		let body_size = 3;
+		let data = [0, 1, 2, 3];
+		let fv = FieldsView::new(&data, body_size);
+
+		assert_eq!(Some(&[1u8, 2, 3] as &[u8]), fv.raw_slice());
+	}
+
+	#[test]
+	fn test_raw_slice2() {
+		let body_size = 3;
+		let data = [0, 1, 2, 3, 0, 4, 5, 6];
+		let fv = FieldsView::new(&data, body_size);
+
+		assert_eq!(None, fv.raw_slice());
+		let (fv1, fv2) = fv.split_at(3);
+		assert_eq!(Some(&[1u8, 2, 3] as &[u8]), fv1.raw_slice());
+		assert_eq!(Some(&[4u8, 5, 6] as &[u8]), fv2.raw_slice());
+	}
+
+	#[test]
+	fn test_raw_slice3() {
+		let body_size = 3;
+		let data = [0, 1, 2, 3, 0, 4, 5, 6];
+		let fv = FieldsView::new(&data, body_size);
+		let (key, value) = fv.split_at(2);
+		let (value, rest) = value.split_at(1);
+
+		assert_eq!(Some(&[1u8, 2] as &[u8]), key.raw_slice());
+		assert_eq!(Some(&[3u8] as &[u8]), value.raw_slice());
+		assert_eq!(Some(&[4u8, 5, 6] as &[u8]), rest.raw_slice());
 	}
 }
