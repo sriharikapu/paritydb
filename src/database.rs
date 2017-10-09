@@ -225,7 +225,6 @@ mod tests {
 		assert_eq!(db.get("cde").unwrap(), None); // from DB
 
 		// Flush journal and fetch everything from DB.
-		// TODO [ToDr] Uncomment me.
 		db.flush_journal(2).unwrap();
 
 		assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
