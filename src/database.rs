@@ -96,12 +96,19 @@ impl Database {
 		let journal = Journal::open(&path)?;
 
 		let db_file_path = path.as_ref().join(Self::DB_FILE);
-		let mmap = Mmap::open_path(db_file_path, Protection::ReadWrite)?;
+		let mut mmap = Mmap::open_path(db_file_path, Protection::ReadWrite)?;
 
 		let meta_file_path = path.as_ref().join(Self::META_FILE);
-		let metadata_mmap = Mmap::open_path(meta_file_path, Protection::ReadWrite)?;
+		let mut metadata_mmap = Mmap::open_path(meta_file_path, Protection::ReadWrite)?;
 
-		let metadata = metadata::bytes::read(unsafe { metadata_mmap.as_slice() }, options.external.key_index_bits);
+		let mut metadata = metadata::bytes::read(unsafe { metadata_mmap.as_slice() }, options.external.key_index_bits);
+
+		if let Some(flush) = Flush::open(path.as_ref(), options.external.key_index_bits)? {
+			flush.flush(unsafe { mmap.as_mut_slice() }, unsafe { metadata_mmap.as_mut_slice() }, &mut metadata);
+			mmap.flush()?;
+			metadata_mmap.flush()?;
+			flush.delete()?;
+		}
 
 		Ok(Database {
 			path: path.as_ref().to_owned(),

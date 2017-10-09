@@ -1,6 +1,7 @@
 extern crate tempdir;
 extern crate paritydb;
 
+use std::fs;
 use tempdir::TempDir;
 use paritydb::{Database, Options, Transaction, ValuesLen};
 
@@ -15,16 +16,7 @@ enum Action {
 
 use Action::*;
 
-fn run_actions(test_name: &'static str, actions: &[Action]) {
-	let temp = TempDir::new(test_name).unwrap();
-
-	let mut db = Database::create(temp.path(), Options {
-		journal_eras: 0,
-		key_len: 3,
-		value_len: ValuesLen::Constant(3),
-		..Default::default()
-	}).unwrap();
-
+fn run_actions(db: &mut Database, actions: &[Action]) {
 	let mut tx = Transaction::default();
 
 	for action in actions {
@@ -55,7 +47,16 @@ macro_rules! db_test {
 	($name: tt, $($actions: expr),*) => {
 		#[test]
 		fn $name() {
-			run_actions(stringify!($name), &[$($actions),*]);
+			let temp = TempDir::new(stringify!($name)).unwrap();
+
+			let mut db = Database::create(temp.path(), Options {
+				journal_eras: 0,
+				key_len: 3,
+				value_len: ValuesLen::Constant(3),
+				..Default::default()
+			}).unwrap();
+
+			run_actions(&mut db, &[$($actions),*]);
 		}
 	}
 }
@@ -285,3 +286,24 @@ db_test!(
 	AssertNone("ddd"),
 	AssertEqual("fff", "003")
 );
+
+#[test]
+fn test_flush_recovery() {
+	let temp = TempDir::new("flush_recovery").unwrap();
+	// this flush file should apply insertions of 2 records
+	// abc -> xyz
+	// cde -> 123
+	fs::copy("tests/flushes/flush_00.flush", temp.path().join("db.flush")).unwrap();
+
+	let mut db = Database::create(temp.path(), Options {
+		journal_eras: 0,
+		key_len: 3,
+		value_len: ValuesLen::Constant(3),
+		..Default::default()
+	}).unwrap();
+
+	run_actions(&mut db, &[
+		AssertEqual("abc", "xyz"),
+		AssertEqual("cde", "123"),
+	]);
+}
