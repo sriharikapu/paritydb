@@ -49,7 +49,7 @@ pub enum Decision<'o, 'db> {
 	SeekSpace,
 	/// Returned only on delete, when deleted value is not found in the database.
 	IgnoreOperation,
-	/// Returned when to many spaces have been shifted forward to make a decision.
+	/// Returned when too many spaces have been shifted forward to make a decision.
 	ConsumeEmptySpace {
 		len: usize,
 	},
@@ -64,11 +64,12 @@ pub enum Decision<'o, 'db> {
 /// Compares occupied space data and operation key.
 #[inline]
 fn compare_space_and_operation(space: &[u8], key: &[u8], field_body_size: usize) -> cmp::Ordering {
-	Record::extract_key(space, field_body_size, key.len()).partial_cmp(&key).unwrap()
+	Record::extract_key(space, field_body_size, key.len()).partial_cmp(&key).expect("extract key size is equal to key.len(); qed")
 }
 
 #[inline]
 pub fn is_min_offset_for_key(offset: usize, shift: isize, key: &[u8], prefix_bits: u8, field_body_size: usize) -> bool {
+	assert!(shift < 0, "calling this function makes sense only if shift is negative");
 	let offset = offset - (-shift) as usize;
 	let prefixed_key = Key::new(key, prefix_bits);
 	let min_offset = prefixed_key.offset(field_body_size);

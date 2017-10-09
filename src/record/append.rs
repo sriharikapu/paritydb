@@ -37,7 +37,7 @@ impl<'a> Iterator for RawRecordIterator<'a> {
 
 		if let Some(ref mut value_len) = self.value_len {
 			if let Some(item) = value_len.next() {
-				return Some(item.unwrap());
+				return Some(item.expect("io::Bytes<io::Cursor<[u8; 4]>> should never return error; qed"));
 			}
 		}
 

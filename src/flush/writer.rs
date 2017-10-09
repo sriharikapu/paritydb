@@ -70,6 +70,9 @@ pub struct OperationWriter<'db, I: Iterator> {
 	field_body_size: usize,
 	prefix_bits: u8,
 	const_value: bool,
+	/// shift is always increased or decreased by a len of inserted/deleted
+	/// record or an empty field. inserted and deleted records are always
+	/// aligned by function append_record from src/record/append.rs.
 	shift: isize,
 }
 
@@ -148,11 +151,10 @@ impl<'op, 'db, I: Iterator<Item = Operation<'op>>> OperationWriter<'db, I> {
 			// write the len of previous operation
 			self.buffer.finish_operation();
 			self.spaces.move_offset_forward(prefixed_key.offset(self.field_body_size));
-		};
+		}
 
 		let space = self.spaces.peek().expect("TODO: db end?")?;
 		let d = decision(operation, space, self.shift, self.field_body_size, self.prefix_bits);
-		println!("d: {:?}", d);
 		match d {
 			Decision::InsertOperationIntoEmptySpace { key, value, offset, space_len } => {
 				// advance iterators
