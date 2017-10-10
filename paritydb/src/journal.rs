@@ -138,9 +138,13 @@ impl JournalEra {
 
 	/// Returns an iterator over era entries
 	pub fn iter(&self) -> btree_set::IntoIter<Operation> {
-		unsafe { OperationsIterator::new(&self.mmap.as_slice()[CHECKSUM_SIZE..]) }
-			.collect::<BTreeSet<_>>()
-			.into_iter()
+		let mut set = BTreeSet::new();
+
+		for o in unsafe { OperationsIterator::new(&self.mmap.as_slice()[CHECKSUM_SIZE..]) } {
+			set.replace(o);
+		}
+
+		set.into_iter()
 	}
 
 	/// Deletes underlying file

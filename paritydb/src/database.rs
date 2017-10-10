@@ -250,4 +250,24 @@ mod tests {
 
 		assert_eq!(*db.get("a").unwrap_err().kind(), ErrorKind::InvalidKeyLen(3, 1));
 	}
+
+	#[test]
+	fn test_same_key_operation_ordering() {
+		let temp = tempdir::TempDir::new("test_fail").unwrap();
+
+		let mut db = Database::create(temp.path(), Options {
+			journal_eras: 0,
+			key_len: 3,
+			..Default::default()
+		}).unwrap();
+
+		let mut tx = Transaction::default();
+		tx.insert("abc", "123");
+		tx.delete("abc");
+
+		db.commit(&tx).unwrap();
+		db.flush_journal(1).unwrap();
+
+		assert_eq!(db.get("abc").unwrap(), None);
+	}
 }
