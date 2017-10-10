@@ -14,3 +14,7 @@ matrix:
   - rust: nightly
   allow_failures:
   - rust: nightly
+
+script:
+  - cargo build --all --exclude benchmarks
+  - cargo test --all --exclude benchmarks

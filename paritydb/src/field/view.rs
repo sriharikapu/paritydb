@@ -56,7 +56,7 @@ impl<'a, T: AsRef<[u8]>> PartialEq<T> for FieldsView<'a> {
 
 		macro_rules! eq {
 			($a: expr, $b: expr) => {
-				if &$a != &$b {
+				if $a != $b {
 					return false;
 				}
 			}
@@ -72,10 +72,6 @@ impl<'a, 'b> PartialEq<FieldsView<'b>> for FieldsView<'a> {
 	fn eq(&self, other: &FieldsView<'b>) -> bool {
 		if self.len != other.len {
 			return false;
-		}
-
-		if self.data == other.data {
-			return self.offset == other.offset;
 		}
 
 		let mut it1 = self.iter();
@@ -100,12 +96,10 @@ impl<'a, T: AsRef<[u8]>> PartialOrd<T> for FieldsView<'a> {
 
 		macro_rules! partial_cmp {
 			($a: expr, $b: expr) => {
-				if &$a < &$b {
-					return Some(cmp::Ordering::Less);
-				}
-
-				if &$a > &$b {
-					return Some(cmp::Ordering::Greater);
+				match $a.cmp(&$b) {
+					cmp::Ordering::Equal => {},
+					cmp::Ordering::Less => return Some(cmp::Ordering::Less),
+					cmp::Ordering::Greater => return Some(cmp::Ordering::Greater),
 				}
 			}
 		}

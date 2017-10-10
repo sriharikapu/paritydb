@@ -1,7 +1,7 @@
 use std::cmp;
 
 use field::iterator::FieldHeaderIterator;
-use field::{Error, Header, HEADER_SIZE};
+use field::{Error, Header, field_size};
 use record::{ValueSize, Record};
 
 /// Record location.
@@ -23,25 +23,27 @@ pub fn find_record<'a>(
 ) -> Result<RecordResult<'a>, Error> {
 	let iter = FieldHeaderIterator::new(data, field_body_size)?;
 
-	for (index, header) in iter.enumerate() {
+	let field_size = field_size(field_body_size);
+	let mut offset = 0;
+	for header in iter {
 		let header = header?;
 		match header {
 			Header::Uninitialized => return Ok(RecordResult::NotFound),
 			Header::Inserted => {
-				let offset = (field_body_size + HEADER_SIZE) * index;
-				match Record::extract_key(&data[offset..], field_body_size, key.len()).partial_cmp(&key) {
-					Some(cmp::Ordering::Less) => {},
-					Some(cmp::Ordering::Equal) => {
-						let record = Record::new(&data[offset..], field_body_size, value_size, key.len());
+				let slice = &data[offset..];
+				match Record::extract_key(slice, field_body_size, key.len()).partial_cmp(&key).unwrap() {
+					cmp::Ordering::Less => {},
+					cmp::Ordering::Equal => {
+						let record = Record::new(slice, field_body_size, value_size, key.len());
 						return Ok(RecordResult::Found(record));
 					},
-					_ => return Ok(RecordResult::NotFound),
+					cmp::Ordering::Greater => return Ok(RecordResult::NotFound),
 				}
 			},
 			Header::Continued => {},
 		}
+		offset += field_size;
 	}
-
 	Ok(RecordResult::OutOfRange)
 }
 
