@@ -113,6 +113,8 @@ impl<'a, T: AsRef<[u8]>> PartialOrd<T> for FieldsView<'a> {
 impl<'a> FieldsView<'a> {
 	/// Creates new `FieldsView` with no offset
 	pub fn new(data: &'a [u8], field_body_size: usize) -> Self {
+		assert!(field_body_size > 0, "field body size can't be zero.");
+
 		FieldsView {
 			data,
 			field_body_size,
@@ -222,6 +224,14 @@ mod tests {
 	use std::cmp;
 
 	use super::FieldsView;
+
+	#[test]
+	#[should_panic(expected = "field body size can't be zero.")]
+	fn test_zero_body_size() {
+		let body_size = 0;
+		let data = [0, 1, 2, 3];
+		FieldsView::new(&data, body_size);
+	}
 
 	#[test]
 	fn test_fields_view_copy_to() {
