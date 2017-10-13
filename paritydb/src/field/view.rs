@@ -141,7 +141,7 @@ impl<'a> FieldsView<'a> {
 		}
 	}
 
-	/// Returns underlaying value if it is a continuous slice of memory,
+	/// Returns underlying value if it is a continuous slice of memory,
 	/// otherwise returns None.
 	pub fn raw_slice(&self) -> Option<&'a [u8]> {
 		let field_size = field_size(self.field_body_size);
