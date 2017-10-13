@@ -39,5 +39,6 @@ mod test {
 		assert_eq!(Header::Uninitialized, Header::from_u8(Header::Uninitialized as u8).unwrap());
 		assert_eq!(Header::Inserted, Header::from_u8(Header::Inserted as u8).unwrap());
 		assert_eq!(Header::Continued, Header::from_u8(Header::Continued as u8).unwrap());
+		assert!(Header::from_u8(100u8).is_err());
 	}
 }

@@ -40,7 +40,7 @@
 //! |...|...........|
 //! ```
 //!
-//! A header is always a single byte which identicates what the body is.
+//! A header is always a single byte which indicates what the body is.
 //!
 //! ```text
 //! 0 - uninitialized

@@ -121,7 +121,7 @@ impl<'a> FieldsView<'a> {
 		}
 	}
 
-	/// Create new `FieldsView` with an offset. Usefull, when reading record body.
+	/// Create new `FieldsView` with an offset. Useful, when reading record body.
 	pub fn with_options(data: &'a [u8], field_body_size: usize, offset: usize, len: usize) -> Self {
 		FieldsView {
 			data,
