@@ -1,0 +1,7 @@
+[package]
+name = "paritydb-cli"
+version = "0.1.0"
+authors = ["Guanqun Lu <guanqun.lu@gmail.com>"]
+
+[dependencies]
+paritydb = { path = "../paritydb" }
