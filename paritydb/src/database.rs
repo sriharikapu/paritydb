@@ -65,6 +65,10 @@ impl Database {
 	/// Creates new database at given location.
 	pub fn create<P: AsRef<Path>>(path: P, options: Options) -> Result<Self> {
 		let options = InternalOptions::from_external(options)?;
+
+		// Create directories if necessary.
+		fs::create_dir_all(&path)?;
+
 		// Create DB file.
 		{
 			let db_file_path = path.as_ref().join(Self::DB_FILE);
