@@ -113,6 +113,8 @@ impl<'a, T: AsRef<[u8]>> PartialOrd<T> for FieldsView<'a> {
 impl<'a> FieldsView<'a> {
 	/// Creates new `FieldsView` with no offset
 	pub fn new(data: &'a [u8], field_body_size: usize) -> Self {
+		assert!(field_body_size > 0, "field body size can't be zero.");
+
 		FieldsView {
 			data,
 			field_body_size,
@@ -141,9 +143,12 @@ impl<'a> FieldsView<'a> {
 		}
 	}
 
-	/// Returns underlaying value if it is a continuous slice of memory,
+	/// Returns underlying value if it is a continuous slice of memory,
 	/// otherwise returns None.
 	pub fn raw_slice(&self) -> Option<&'a [u8]> {
+		if self.len == 0 {
+			return Some(&[]);
+		}
 		let field_size = field_size(self.field_body_size);
 		let start = self.offset + HEADER_SIZE * self.offset / self.field_body_size + HEADER_SIZE;
 		let end = start + self.len;
@@ -219,6 +224,14 @@ mod tests {
 	use std::cmp;
 
 	use super::FieldsView;
+
+	#[test]
+	#[should_panic(expected = "field body size can't be zero.")]
+	fn test_zero_body_size() {
+		let body_size = 0;
+		let data = [0, 1, 2, 3];
+		FieldsView::new(&data, body_size);
+	}
 
 	#[test]
 	fn test_fields_view_copy_to() {
@@ -410,5 +423,32 @@ mod tests {
 		assert_eq!(Some(&[1u8, 2] as &[u8]), key.raw_slice());
 		assert_eq!(Some(&[3u8] as &[u8]), value.raw_slice());
 		assert_eq!(Some(&[4u8, 5, 6] as &[u8]), rest.raw_slice());
+	}
+
+	#[test]
+	fn test_raw_slice4() {
+		let body_size = 3;
+		let data = [0, 1, 2];
+		let fv = FieldsView::new(&data, body_size);
+
+		assert_eq!(Some(&[1u8, 2] as &[u8]), fv.raw_slice());
+	}
+
+	#[test]
+	fn test_raw_slice_empty_array() {
+		let body_size = 3;
+		let data = [];
+		let fv = FieldsView::new(&data, body_size);
+
+		assert_eq!(Some(&[] as &[u8]), fv.raw_slice());
+	}
+
+	#[test]
+	fn test_raw_slice_empty_body() {
+		let body_size = 3;
+		let data = [0];
+		let fv = FieldsView::new(&data, body_size);
+
+		assert_eq!(Some(&[] as &[u8]), fv.raw_slice());
 	}
 }
