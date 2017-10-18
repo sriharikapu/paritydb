@@ -148,7 +148,7 @@ impl Database {
 			)?;
 			era.delete()?;
 			// TODO: metadata should be a single structure
-			// updateing self.metadata should happen after all calls
+			// updating self.metadata should happen after all calls
 			// which may fail ("?")
 			flush.flush(unsafe { self.mmap.as_mut_slice() }, unsafe { self.metadata_mmap.as_mut_slice() }, &mut self.metadata);
 			self.mmap.flush()?;

@@ -15,7 +15,7 @@ macro_rules! try_next {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct OccupiedSpace<'a> {
-	/// Offset from the begining of iteration slice
+	/// Offset from the beginning of iteration slice
 	pub offset: usize,
 	pub data: &'a [u8],
 }
@@ -82,7 +82,7 @@ impl<'a> Iterator for SpaceIterator<'a> {
 			let header = try_next!(header);
 			match header {
 				Header::Continued => match first_header {
-					// ommit continued fields at the beginning
+					// omit continued fields at the beginning
 					None => {
 						start += field_size;
 						self.offset += field_size;

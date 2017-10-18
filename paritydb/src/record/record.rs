@@ -72,7 +72,7 @@ impl<'a> Record<'a> {
 		self.value == slice
 	}
 
-	/// Returns underlaying value if it is a continuous slice of memory,
+	/// Returns underlying value if it is a continuous slice of memory,
 	/// otherwise returns None.
 	pub fn value_raw_slice(&self) -> Option<&'a [u8]> {
 		self.value.raw_slice()
