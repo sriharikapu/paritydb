@@ -47,6 +47,54 @@ pub fn find_record<'a>(
 	Ok(RecordResult::OutOfRange)
 }
 
+pub fn iter<'a>(
+	data: &'a [u8],
+	field_body_size: usize,
+	key_size: usize,
+	value_size: ValueSize
+) -> Result<RecordIterator<'a>, Error> {
+	let field_header_iter = FieldHeaderIterator::new(data, field_body_size)?;
+
+	let offset = 0;
+	let field_size = field_size(field_body_size);
+
+	Ok(RecordIterator { data, offset, field_header_iter, field_body_size, field_size, key_size, value_size })
+}
+
+pub struct RecordIterator<'a> {
+	data: &'a [u8],
+	offset: usize,
+	field_header_iter: FieldHeaderIterator<'a>,
+	field_body_size: usize,
+	field_size: usize,
+	key_size: usize,
+	value_size: ValueSize
+}
+
+impl<'a> Iterator for RecordIterator<'a> {
+	type Item = Result<Record<'a>, Error>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.field_header_iter.next().and_then(|header| {
+			if let Ok(header) = header {
+				match header {
+					Header::Uninitialized | Header::Continued => {
+						self.offset += self.field_size;
+						return self.next();
+					}
+					Header::Inserted => {
+						let slice = &self.data[self.offset..];
+						self.offset += self.field_size;
+						return Some(Ok(Record::new(slice, self.field_body_size, self.value_size, self.key_size)));
+					},
+				}
+			}
+
+			None
+		})
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::{find_record, RecordResult};
