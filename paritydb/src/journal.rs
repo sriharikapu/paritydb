@@ -136,15 +136,19 @@ impl JournalEra {
 		}
 	}
 
-	/// Returns an iterator over era entries
-	pub fn iter(&self) -> btree_set::IntoIter<Operation> {
-		let mut set = BTreeSet::new();
+	fn operations(&self) -> BTreeSet<Operation> {
+		let mut ops = BTreeSet::new();
 
 		for o in unsafe { OperationsIterator::new(&self.mmap.as_slice()[CHECKSUM_SIZE..]) } {
-			set.replace(o);
+			ops.replace(o);
 		}
 
-		set.into_iter()
+		ops
+	}
+
+	/// Returns an iterator over era entries
+	pub fn iter(&self) -> btree_set::IntoIter<Operation> {
+		self.operations().into_iter()
 	}
 
 	/// Deletes underlying file
@@ -283,6 +287,17 @@ impl Journal {
 		}
 
 		None
+	}
+
+	/// Returns an iterator over the journal entries across all eras
+	pub fn iter(&self) -> btree_set::IntoIter<Operation> {
+		let mut ops = BTreeSet::new();
+		for era in self.eras.iter() {
+			// append should take the value from `era` for keys that are equal
+			ops.append(&mut era.operations())
+		}
+
+		ops.into_iter()
 	}
 }
 
