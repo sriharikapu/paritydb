@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+use std::collections::btree_set;
 use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::{cmp, fs};
@@ -5,6 +7,7 @@ use std::{cmp, fs};
 use memmap::{Mmap, Protection};
 
 use error::{ErrorKind, Result};
+use field::iterator::FieldHeaderIterator;
 use find;
 use flush::Flush;
 use journal::Journal;
@@ -12,7 +15,7 @@ use key::Key;
 use metadata::{self, Metadata};
 use options::{Options, InternalOptions};
 use record::Record;
-use transaction::Transaction;
+use transaction::{Operation, Transaction};
 
 /// A database record value.
 #[derive(Debug, PartialEq)]
@@ -192,6 +195,133 @@ impl Database {
 			},
 			find::RecordResult::NotFound => Ok(None),
 			find::RecordResult::OutOfRange => unimplemented!(),
+		}
+	}
+
+	pub fn iter(&self) -> Result<DatabaseIterator> {
+		let data = unsafe { &self.mmap.as_slice() };
+		let field_body_size = self.options.field_body_size;
+		let key_size = self.options.external.key_len;
+		let value_size = self.options.value_size;
+
+		let record_iter = find::iter(data, field_body_size, key_size, value_size)?;
+		let journal_iter = self.journal.iter();
+		let pending = IteratorValue::None;
+
+		Ok(DatabaseIterator { record_iter, journal_iter, key_size, pending })
+	}
+}
+
+#[derive(Debug)]
+enum IteratorValue<'a> {
+	None,
+	Journal(Operation<'a>),
+	DB(Record<'a>),
+}
+
+impl<'a> IteratorValue<'a> {
+	fn take(&mut self) -> Self {
+		::std::mem::replace(self, IteratorValue::None)
+	}
+}
+
+pub struct DatabaseIterator<'a> {
+	journal_iter: btree_set::IntoIter<Operation<'a>>,
+	record_iter: find::RecordIterator<'a>,
+	key_size: usize,
+	pending: IteratorValue<'a>,
+}
+
+impl<'a> Iterator for DatabaseIterator<'a> {
+	type Item = Result<(Cow<'a, [u8]>, Value<'a>)>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let (operation, record) = match self.pending.take() {
+			// FIXME: return Err from record_iter.next() instead of swallowing error
+			IteratorValue::None =>
+				(self.journal_iter.next().map(|o| IteratorValue::Journal(o)).unwrap_or(IteratorValue::None),
+				 self.record_iter.next().and_then(|r| r.map(|r| Some(IteratorValue::DB(r))).unwrap_or(None)).unwrap_or(IteratorValue::None)),
+
+			v @ IteratorValue::Journal(_) =>
+				(v,
+				 self.record_iter.next().and_then(|r| r.map(|r| Some(IteratorValue::DB(r))).unwrap_or(None)).unwrap_or(IteratorValue::None)),
+
+			v @ IteratorValue::DB(_) =>
+				(self.journal_iter.next().map(|o| IteratorValue::Journal(o)).unwrap_or(IteratorValue::None),
+				 v),
+		};
+
+		match (operation, record) {
+			(IteratorValue::Journal(o), IteratorValue::None) => {
+				self.pending = IteratorValue::None;
+				match o {
+					Operation::Delete(_) => {
+						return self.next();
+					},
+					Operation::Insert(key, value) => {
+						Some(Ok((Cow::Borrowed(key), Value::Raw(value))))
+					},
+				}
+			},
+			(IteratorValue::None, IteratorValue::DB(r)) => {
+				self.pending = IteratorValue::None;
+				let key = {
+					let mut v = Vec::with_capacity(self.key_size);
+					v.resize(self.key_size, 0);
+					r.read_key(&mut v);
+					v
+				};
+
+				let value = match r.value_raw_slice() {
+					Some(raw) => Value::Raw(raw),
+					None => Value::Record(r),
+				};
+
+				Some(Ok((Cow::Owned(key), value)))
+			},
+			(IteratorValue::Journal(o), IteratorValue::DB(r)) => {
+				let (res, pending) =
+					if r.key_is_equal(o.key()) {
+						match o {
+							Operation::Delete(_) => {
+								self.pending = IteratorValue::None;
+								return self.next();
+							},
+							Operation::Insert(key, value) => {
+								((Cow::Borrowed(key), Value::Raw(value)), IteratorValue::None)
+							},
+						}
+					} else if r.key_is_greater(o.key()) {
+						match o {
+							Operation::Delete(_) => {
+								self.pending = IteratorValue::DB(r);
+								return self.next();
+							},
+							Operation::Insert(key, value) => {
+								((Cow::Borrowed(key), Value::Raw(value)), IteratorValue::DB(r))
+							},
+						}
+					} else {
+						let key = {
+							let mut v = Vec::with_capacity(self.key_size);
+							v.resize(self.key_size, 0);
+							r.read_key(&mut v);
+							v
+						};
+
+						let value = match r.value_raw_slice() {
+							Some(raw) => Value::Raw(raw),
+							None => Value::Record(r),
+						};
+
+						((Cow::Owned(key), value), IteratorValue::Journal(o))
+					};
+
+				self.pending = pending;
+				Some(Ok(res))
+			},
+			(IteratorValue::None, IteratorValue::None) => None,
+			_ => unreachable!()
 		}
 	}
 }
