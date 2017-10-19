@@ -137,7 +137,11 @@ impl Database {
 
 	/// Commits changes in the transaction.
 	pub fn commit(&mut self, tx: &Transaction) -> Result<()> {
-		// TODO [ToDr] Validate key size
+		for op in tx.operations() {
+			if op.key().len() != self.options.external.key_len {
+				return Err(ErrorKind::InvalidKeyLen(self.options.external.key_len, op.key().len()).into());
+			}
+		}
 		self.journal.push(tx)?;
 		Ok(())
 	}
@@ -376,6 +380,22 @@ mod tests {
 
 		assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
 		assert_eq!(db.get("cde").unwrap(), None);
+	}
+
+	#[test]
+	fn validate_key_length_at_insert() {
+		let temp = tempdir::TempDir::new("validate_key_length").unwrap();
+
+		let mut db = Database::create(temp.path(), Options {
+			journal_eras: 0,
+			key_len: 3,
+			..Default::default()
+		}).unwrap();
+
+		let mut tx = Transaction::default();
+		tx.insert("abcdef", "456");
+
+		assert_eq!(*db.commit(&tx).unwrap_err().kind(), ErrorKind::InvalidKeyLen(3, 6));
 	}
 
 	#[test]
