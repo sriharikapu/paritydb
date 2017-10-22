@@ -7,7 +7,6 @@ use std::{cmp, fs};
 use memmap::{Mmap, Protection};
 
 use error::{ErrorKind, Result};
-use field::iterator::FieldHeaderIterator;
 use find;
 use flush::Flush;
 use journal::Journal;
@@ -200,11 +199,12 @@ impl Database {
 
 	pub fn iter(&self) -> Result<DatabaseIterator> {
 		let data = unsafe { &self.mmap.as_slice() };
+		let occupied_offset_iter = self.metadata.prefixes.offset_iter();
 		let field_body_size = self.options.field_body_size;
 		let key_size = self.options.external.key_len;
 		let value_size = self.options.value_size;
 
-		let record_iter = find::iter(data, field_body_size, key_size, value_size)?;
+		let record_iter = find::iter(data, occupied_offset_iter, field_body_size, key_size, value_size)?;
 		let journal_iter = self.journal.iter();
 		let pending = IteratorValue::None;
 

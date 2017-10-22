@@ -2,6 +2,7 @@ use std::cmp;
 
 use field::iterator::FieldHeaderIterator;
 use field::{Error, Header, field_size};
+use prefix_tree::OccupiedOffsetIterator;
 use record::{ValueSize, Record};
 
 /// Record location.
@@ -49,22 +50,23 @@ pub fn find_record<'a>(
 
 pub fn iter<'a>(
 	data: &'a [u8],
+	occupied_offset_iter: OccupiedOffsetIterator<'a>,
 	field_body_size: usize,
 	key_size: usize,
 	value_size: ValueSize
 ) -> Result<RecordIterator<'a>, Error> {
-	let field_header_iter = FieldHeaderIterator::new(data, field_body_size)?;
-
 	let offset = 0;
+	let peek_offset = None;
 	let field_size = field_size(field_body_size);
 
-	Ok(RecordIterator { data, offset, field_header_iter, field_body_size, field_size, key_size, value_size })
+	Ok(RecordIterator { data, occupied_offset_iter, offset, peek_offset, field_body_size, field_size, key_size, value_size })
 }
 
 pub struct RecordIterator<'a> {
 	data: &'a [u8],
-	offset: usize,
-	field_header_iter: FieldHeaderIterator<'a>,
+	occupied_offset_iter: OccupiedOffsetIterator<'a>,
+	offset: u32,
+	peek_offset: Option<u32>,
 	field_body_size: usize,
 	field_size: usize,
 	key_size: usize,
@@ -75,23 +77,36 @@ impl<'a> Iterator for RecordIterator<'a> {
 	type Item = Result<Record<'a>, Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.field_header_iter.next().and_then(|header| {
-			if let Ok(header) = header {
-				match header {
-					Header::Uninitialized | Header::Continued => {
-						self.offset += self.field_size;
-						return self.next();
-					}
-					Header::Inserted => {
-						let slice = &self.data[self.offset..];
-						self.offset += self.field_size;
-						return Some(Ok(Record::new(slice, self.field_body_size, self.value_size, self.key_size)));
-					},
-				}
-			}
+		if let None = self.peek_offset {
+			let offset = self.offset;
+			self.peek_offset = self.occupied_offset_iter.by_ref().skip_while(|i| *i < offset).next();
+			self.offset = self.peek_offset.unwrap_or(0);
+		}
 
-			None
-		})
+		match self.peek_offset {
+			Some(offset) => {
+				self.offset += 1;
+				let slice = &self.data[offset as usize * self.field_size..];
+				// FIXME: handle Err
+				let header = Header::from_u8(slice[0]).unwrap();
+				match header {
+					Header::Uninitialized => {
+						self.peek_offset = None;
+						return self.next()
+					},
+					Header::Continued => {
+						self.peek_offset = Some(offset + 1);
+						return self.next()
+					},
+					Header::Inserted => {
+						self.peek_offset = Some(offset + 1);
+						let record = Record::new(slice, self.field_body_size, self.value_size, self.key_size);
+						Some(Ok(record))
+					}
+				}
+			},
+			_ => None
+		}
 	}
 }
 
