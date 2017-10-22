@@ -11,7 +11,7 @@ use memmap::{Mmap, Protection};
 use tiny_keccak::sha3_256;
 
 use error::{ErrorKind, Result};
-use transaction::{Transaction, OperationsIterator, Operation};
+use transaction::{Operation, OperationsIterator, Transaction};
 
 const CHECKSUM_SIZE: usize = 32;
 
@@ -309,7 +309,7 @@ mod tests {
 	use std::fs;
 	use std::io::Write;
 	use error::ErrorKind;
-	use transaction::Transaction;
+	use transaction::{Operation, Transaction};
 	use super::{Journal, JournalEra, JournalOperation};
 
 	#[test]
@@ -345,6 +345,36 @@ mod tests {
 		journal.drain_front(2);
 
 		assert_eq!(journal.len(), 1);
+	}
+
+	#[test]
+	fn test_journal_iter() {
+		let temp = TempDir::new("test_journal_iter").unwrap();
+
+		let mut journal = Journal::open(temp.path()).unwrap();
+
+		let mut tx1 = Transaction::default();
+		tx1.insert(b"key", b"value");
+		tx1.insert(b"key2", b"value");
+		tx1.insert(b"key3", b"value");
+
+		let mut tx2 = Transaction::default();
+		tx2.insert(b"key2", b"value2");
+		tx2.delete(b"key3");
+		tx2.insert(b"key4", b"value4");
+
+		journal.push(&tx1).unwrap();
+		journal.push(&tx2).unwrap();
+
+		assert_eq!(journal.len(), 2);
+
+		assert_eq!(
+			journal.iter().collect::<Vec<_>>(),
+			vec![
+				Operation::Insert(b"key" as &[u8], b"value" as &[u8]),
+				Operation::Insert(b"key2" as &[u8], b"value2" as &[u8]),
+				Operation::Delete(b"key3" as &[u8]),
+				Operation::Insert(b"key4" as &[u8], b"value4" as &[u8])]);
 	}
 
 	#[test]
