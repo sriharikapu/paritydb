@@ -197,6 +197,7 @@ impl Database {
 		}
 	}
 
+	/// Returns an iterator over the database key-value pairs.
 	pub fn iter(&self) -> Result<DatabaseIterator> {
 		let data = unsafe { &self.mmap.as_slice() };
 		let occupied_offset_iter = self.metadata.prefixes.offset_iter();
@@ -237,18 +238,29 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		let (operation, record) = match self.pending.take() {
-			// FIXME: return Err from record_iter.next() instead of swallowing error
-			IteratorValue::None =>
-				(self.journal_iter.next().map(|o| IteratorValue::Journal(o)).unwrap_or(IteratorValue::None),
-				 self.record_iter.next().and_then(|r| r.map(|r| Some(IteratorValue::DB(r))).unwrap_or(None)).unwrap_or(IteratorValue::None)),
+			IteratorValue::None => {
+				let j = self.journal_iter.next().map(|o| IteratorValue::Journal(o)).unwrap_or(IteratorValue::None);
+				let db = match self.record_iter.next() {
+					None => IteratorValue::None,
+					Some(Ok(r)) => IteratorValue::DB(r),
+					Some(Err(err)) => return Some(Err(err.into())),
+				};
 
-			v @ IteratorValue::Journal(_) =>
-				(v,
-				 self.record_iter.next().and_then(|r| r.map(|r| Some(IteratorValue::DB(r))).unwrap_or(None)).unwrap_or(IteratorValue::None)),
+				(j, db)
+			},
+			j @ IteratorValue::Journal(_) => {
+				let db = match self.record_iter.next() {
+					None => IteratorValue::None,
+					Some(Ok(r)) => IteratorValue::DB(r),
+					Some(Err(err)) => return Some(Err(err.into())),
+				};
 
-			v @ IteratorValue::DB(_) =>
+				(j, db)
+			},
+			db @ IteratorValue::DB(_) => {
 				(self.journal_iter.next().map(|o| IteratorValue::Journal(o)).unwrap_or(IteratorValue::None),
-				 v),
+				 db)
+			},
 		};
 
 		match (operation, record) {
