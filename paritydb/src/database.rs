@@ -239,7 +239,7 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 	fn next(&mut self) -> Option<Self::Item> {
 		let (operation, record) = match self.pending.take() {
 			IteratorValue::None => {
-				let j = self.journal_iter.next().map(|o| IteratorValue::Journal(o)).unwrap_or(IteratorValue::None);
+				let j = self.journal_iter.next().map_or(IteratorValue::None, IteratorValue::Journal);
 				let db = match self.record_iter.next() {
 					None => IteratorValue::None,
 					Some(Ok(r)) => IteratorValue::DB(r),
@@ -264,8 +264,9 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 				(j, db)
 			},
 			db @ IteratorValue::DB(_) => {
-				(self.journal_iter.next().map(|o| IteratorValue::Journal(o)).unwrap_or(IteratorValue::None),
-				 db)
+				let j = self.journal_iter.next().map_or(IteratorValue::None, IteratorValue::Journal);
+
+				(j, db)
 			},
 		};
 
