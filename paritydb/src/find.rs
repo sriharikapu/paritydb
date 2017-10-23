@@ -77,43 +77,50 @@ impl<'a, T: Iterator<Item=u32>> Iterator for RecordIterator<'a, T> {
 	type Item = Result<Record<'a>, Error>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		if let None = self.peek_offset {
-			let offset = self.offset;
-			self.peek_offset = self.occupied_offset_iter.by_ref().skip_while(|i| *i < offset).next();
-			self.offset = self.peek_offset.unwrap_or(offset);
-		}
+		loop {
+			if let None = self.peek_offset {
+				let occupied_offset = self.occupied_offset_iter.next();
 
-		match self.peek_offset {
-			Some(offset) => {
-				// reached eof
-				if offset as usize * self.field_size >= self.data.len() { return None }
-
-				self.offset += 1;
-
-				let slice = &self.data[offset as usize * self.field_size..];
-
-				let header = match Header::from_u8(slice[0]) {
-					Ok(header) => header,
-					Err(err) => return Some(Err(err)),
-				};
-
-				match header {
-					Header::Uninitialized => {
-						self.peek_offset = None;
-						self.next()
-					},
-					Header::Continued => {
-						self.peek_offset = Some(offset + 1);
-						self.next()
-					},
-					Header::Inserted => {
-						self.peek_offset = Some(offset + 1);
-						let record = Record::new(slice, self.field_body_size, self.value_size, self.key_size);
-						Some(Ok(record))
+				if let Some(occupied_offset) = occupied_offset {
+					if occupied_offset < self.offset {
+						continue;
 					}
 				}
-			},
-			_ => None
+
+				self.peek_offset = occupied_offset;
+				self.offset = self.peek_offset.unwrap_or(self.offset);
+			}
+
+			match self.peek_offset {
+				Some(offset) => {
+					// reached eof
+					if offset as usize * self.field_size >= self.data.len() { return None }
+
+					self.offset += 1;
+
+					let slice = &self.data[offset as usize * self.field_size..];
+
+					let header = match Header::from_u8(slice[0]) {
+						Ok(header) => header,
+						Err(err) => return Some(Err(err)),
+					};
+
+					match header {
+						Header::Uninitialized => {
+							self.peek_offset = None;
+						},
+						Header::Continued => {
+							self.peek_offset = Some(offset + 1);
+						},
+						Header::Inserted => {
+							self.peek_offset = Some(offset + 1);
+							let record = Record::new(slice, self.field_body_size, self.value_size, self.key_size);
+							return Some(Ok(record))
+						}
+					}
+				},
+				_ => return None
+			}
 		}
 	}
 }
