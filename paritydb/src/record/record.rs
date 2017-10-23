@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use byteorder::{LittleEndian, ByteOrder};
 
 use field::view::FieldsView;
@@ -65,6 +67,10 @@ impl<'a> Record<'a> {
 	/// Returns true of record key is strictly greater than given slice.
 	pub fn key_is_greater(&self, slice: &[u8]) -> bool {
 		self.key > slice
+	}
+
+	pub fn key_cmp(&self, slice: &[u8]) -> Option<Ordering> {
+		self.key.partial_cmp(&slice)
 	}
 
 	/// Returns true of record value is equal to given slice.

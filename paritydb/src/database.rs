@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::btree_set;
 use std::io::Write;
 use std::path::{PathBuf, Path};
@@ -301,35 +302,41 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 			},
 			(IteratorValue::Journal(o), IteratorValue::DB(r)) => {
 				let (res, pending) =
-					if r.key_is_equal(o.key()) {
-						match o {
-							Operation::Delete(_) => {
-								self.pending = IteratorValue::None;
-								return self.next();
-							},
-							Operation::Insert(key, value) => {
-								((Cow::Borrowed(key), Value::Raw(value)), IteratorValue::None)
-							},
-						}
-					} else if r.key_is_greater(o.key()) {
-						match o {
-							Operation::Delete(_) => {
-								self.pending = IteratorValue::DB(r);
-								return self.next();
-							},
-							Operation::Insert(key, value) => {
-								((Cow::Borrowed(key), Value::Raw(value)), IteratorValue::DB(r))
-							},
-						}
-					} else {
-						let key = {
-							let mut v = Vec::with_capacity(self.key_size);
-							v.resize(self.key_size, 0);
-							r.read_key(&mut v);
-							v
-						};
+					match r.key_cmp(o.key()) {
+						Some(Ordering::Equal) => {
+							match o {
+								Operation::Delete(_) => {
+									self.pending = IteratorValue::None;
+									return self.next();
+								},
+								Operation::Insert(key, value) => {
+									((Cow::Borrowed(key), Value::Raw(value)), IteratorValue::None)
+								},
+							}
+						},
+						Some(Ordering::Greater) => {
+							match o {
+								Operation::Delete(_) => {
+									self.pending = IteratorValue::DB(r);
+									return self.next();
+								},
+								Operation::Insert(key, value) => {
+									((Cow::Borrowed(key), Value::Raw(value)), IteratorValue::DB(r))
+								},
+							}
+						},
+						Some(Ordering::Less) => {
+							let key = {
+								let mut v = Vec::with_capacity(self.key_size);
+								v.resize(self.key_size, 0);
+								r.read_key(&mut v);
+								v
+							};
 
-						((Cow::Owned(key), Value::from(r)), IteratorValue::Journal(o))
+							((Cow::Owned(key), Value::from(r)), IteratorValue::Journal(o))
+						},
+						None => unreachable!("only returned when compared keys don't have the same size; \
+											  all keys should have the same size; qed"),
 					};
 
 				self.pending = pending;
