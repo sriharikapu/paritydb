@@ -7,6 +7,7 @@ pub struct Key<'a> {
 
 impl<'a> Key<'a> {
 	pub fn new(key: &'a [u8], prefix_bits: u8) -> Self {
+		assert!(prefix_bits <= 32u8);
 		let prefix = Self::read_prefix(key, prefix_bits);
 		Key {
 			key,
@@ -45,6 +46,7 @@ mod tests {
 	fn should_read_prefix_correctly() {
 		let k = vec![0xff, 0xfe, 0xdc, 0xba];
 
+		assert_eq!(Key::new(&k, 0).prefix, 0x0);
 		assert_eq!(Key::new(&k, 1).prefix, 0x1);
 		assert_eq!(Key::new(&k, 2).prefix, 0x3);
 		assert_eq!(Key::new(&k, 4).prefix, 0xf);
