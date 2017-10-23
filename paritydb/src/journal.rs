@@ -193,8 +193,13 @@ mod dir {
 	}
 
 	fn era_index<P: AsRef<Path>>(path: P) -> Result<u64> {
-		let path = path.as_ref().display().to_string();
-		Ok(1u64 + path[..path.len() - ERA_EXTENSION.len()].parse::<u64>()?)
+		let path = path.as_ref()
+			.file_stem()
+			.ok_or(ErrorKind::CorruptedJournal(
+				path.as_ref().into(),
+				"No file stem found".to_string()))?
+			.to_string_lossy();
+		Ok(1u64 + path.parse::<u64>()?)
 	}
 
 	pub fn next_era_index<P: AsRef<Path>>(files: &[P]) -> Result<u64> {
@@ -208,6 +213,19 @@ mod dir {
 		let mut dir = dir.as_ref().to_path_buf();
 		dir.push(format!("{}{}", next_index, ERA_EXTENSION));
 		dir
+	}
+
+	#[cfg(test)]
+	mod tests {
+		use super::era_index;
+
+		#[test]
+		fn test_era_index() {
+			assert_eq!(1u64, era_index("0.era").unwrap());
+			assert_eq!(1u64, era_index("/path/0.era").unwrap());
+			assert!(era_index("a.era").is_err());
+			assert!(era_index("/path/..").is_err());
+		}
 	}
 }
 
