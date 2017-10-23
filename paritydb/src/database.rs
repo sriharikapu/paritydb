@@ -243,7 +243,10 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 				let db = match self.record_iter.next() {
 					None => IteratorValue::None,
 					Some(Ok(r)) => IteratorValue::DB(r),
-					Some(Err(err)) => return Some(Err(err.into())),
+					Some(Err(err)) => {
+						self.pending = j;
+						return Some(Err(err.into()));
+					},
 				};
 
 				(j, db)
@@ -252,7 +255,10 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 				let db = match self.record_iter.next() {
 					None => IteratorValue::None,
 					Some(Ok(r)) => IteratorValue::DB(r),
-					Some(Err(err)) => return Some(Err(err.into())),
+					Some(Err(err)) => {
+						self.pending = j;
+						return Some(Err(err.into()));
+					},
 				};
 
 				(j, db)
