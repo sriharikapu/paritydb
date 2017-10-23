@@ -244,106 +244,103 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 	type Item = Result<(Cow<'a, [u8]>, Value<'a>)>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let (operation, record) = match self.pending.take() {
-			IteratorValue::None => {
-				let j = self.journal_iter.next().map_or(IteratorValue::None, IteratorValue::Journal);
-				let db = match self.record_iter.next() {
-					None => IteratorValue::None,
-					Some(Ok(r)) => IteratorValue::DB(r),
-					Some(Err(err)) => {
-						self.pending = j;
-						return Some(Err(err.into()));
-					},
-				};
+		loop {
+			let (operation, record) = match self.pending.take() {
+				IteratorValue::None => {
+					let j = self.journal_iter.next().map_or(IteratorValue::None, IteratorValue::Journal);
+					let db = match self.record_iter.next() {
+						None => IteratorValue::None,
+						Some(Ok(r)) => IteratorValue::DB(r),
+						Some(Err(err)) => {
+							self.pending = j;
+							return Some(Err(err.into()));
+						},
+					};
 
-				(j, db)
-			},
-			j @ IteratorValue::Journal(_) => {
-				let db = match self.record_iter.next() {
-					None => IteratorValue::None,
-					Some(Ok(r)) => IteratorValue::DB(r),
-					Some(Err(err)) => {
-						self.pending = j;
-						return Some(Err(err.into()));
-					},
-				};
+					(j, db)
+				},
+				j @ IteratorValue::Journal(_) => {
+					let db = match self.record_iter.next() {
+						None => IteratorValue::None,
+						Some(Ok(r)) => IteratorValue::DB(r),
+						Some(Err(err)) => {
+							self.pending = j;
+							return Some(Err(err.into()));
+						},
+					};
 
-				(j, db)
-			},
-			db @ IteratorValue::DB(_) => {
-				let j = self.journal_iter.next().map_or(IteratorValue::None, IteratorValue::Journal);
+					(j, db)
+				},
+				db @ IteratorValue::DB(_) => {
+					let j = self.journal_iter.next().map_or(IteratorValue::None, IteratorValue::Journal);
 
-				(j, db)
-			},
-		};
+					(j, db)
+				},
+			};
 
-		match (operation, record) {
-			(IteratorValue::Journal(o), IteratorValue::None) => {
-				self.pending = IteratorValue::None;
+			#[inline]
+			// returns `None` if the operation is a `Delete` and we should skip to the next value
+			fn handle_journal_operation<'a>(o: Operation<'a>) -> Option<Result<(Cow<'a, [u8]>, Value<'a>)>> {
 				match o {
 					Operation::Delete(_) => {
-						return self.next();
+						None
 					},
 					Operation::Insert(key, value) => {
 						Some(Ok((Cow::Borrowed(key), Value::Raw(value))))
 					},
 				}
-			},
-			(IteratorValue::None, IteratorValue::DB(r)) => {
-				self.pending = IteratorValue::None;
+			}
+
+			#[inline]
+			fn handle_db_record<'a>(r: Record<'a>, key_size: usize) -> Option<Result<(Cow<'a, [u8]>, Value<'a>)>> {
 				let key = {
-					let mut v = Vec::with_capacity(self.key_size);
-					v.resize(self.key_size, 0);
+					let mut v = Vec::with_capacity(key_size);
+					v.resize(key_size, 0);
 					r.read_key(&mut v);
 					v
 				};
 
 				Some(Ok((Cow::Owned(key), Value::from(r))))
-			},
-			(IteratorValue::Journal(o), IteratorValue::DB(r)) => {
-				let (res, pending) =
+			}
+
+			match (operation, record) {
+				(IteratorValue::Journal(o), IteratorValue::None) => {
+					match handle_journal_operation(o) {
+						None => continue,
+						s => return s,
+					};
+				},
+				(IteratorValue::None, IteratorValue::DB(r)) => {
+					return handle_db_record(r, self.key_size);
+				},
+				(IteratorValue::Journal(o), IteratorValue::DB(r)) => {
 					match r.key_cmp(o.key()) {
 						Some(Ordering::Equal) => {
-							match o {
-								Operation::Delete(_) => {
-									self.pending = IteratorValue::None;
-									return self.next();
-								},
-								Operation::Insert(key, value) => {
-									((Cow::Borrowed(key), Value::Raw(value)), IteratorValue::None)
-								},
-							}
+							match handle_journal_operation(o) {
+								None => continue,
+								s => return s,
+							};
 						},
 						Some(Ordering::Greater) => {
-							match o {
-								Operation::Delete(_) => {
-									self.pending = IteratorValue::DB(r);
-									return self.next();
-								},
-								Operation::Insert(key, value) => {
-									((Cow::Borrowed(key), Value::Raw(value)), IteratorValue::DB(r))
-								},
-							}
+							self.pending = IteratorValue::DB(r);
+
+							match handle_journal_operation(o) {
+								None => continue,
+								s => return s,
+							};
 						},
 						Some(Ordering::Less) => {
-							let key = {
-								let mut v = Vec::with_capacity(self.key_size);
-								v.resize(self.key_size, 0);
-								r.read_key(&mut v);
-								v
-							};
+							self.pending = IteratorValue::Journal(o);
 
-							((Cow::Owned(key), Value::from(r)), IteratorValue::Journal(o))
+							return handle_db_record(r, self.key_size);
 						},
 						None => unreachable!("only returned when compared keys don't have the same size; \
 											  all keys should have the same size; qed"),
 					};
-
-				self.pending = pending;
-				Some(Ok(res))
-			},
-			(IteratorValue::None, IteratorValue::None) => None,
-			_ => unreachable!()
+				},
+				(IteratorValue::None, IteratorValue::None) => return None,
+				_ => unreachable!()
+			};
 		}
 	}
 }

@@ -69,6 +69,7 @@ impl<'a> Record<'a> {
 		self.key > slice
 	}
 
+	/// Returns an ordering between self and the given slice if both have the same length.
 	pub fn key_cmp(&self, slice: &[u8]) -> Option<Ordering> {
 		self.key.partial_cmp(&slice)
 	}
