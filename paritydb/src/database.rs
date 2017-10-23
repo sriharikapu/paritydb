@@ -404,4 +404,50 @@ mod tests {
 
 		assert_eq!(db.get("abc").unwrap(), None);
 	}
+
+	#[test]
+	fn test_iter() {
+		let temp = tempdir::TempDir::new("test_iter").unwrap();
+
+		let mut db = Database::create(temp.path(), Options {
+			journal_eras: 0,
+			key_len: 3,
+			value_len: ValuesLen::Constant(3),
+			..Default::default()
+		}).unwrap();
+
+		let mut tx1 = Transaction::default();
+		tx1.insert("abc", "123");
+		tx1.insert("def", "467");
+		tx1.insert("ghi", "zzz");
+
+		db.commit(&tx1).unwrap();
+		db.flush_journal(1).unwrap();
+
+		let mut tx2 = Transaction::default();
+		tx2.insert("jkl", "999");
+		tx2.insert("def", "333");
+		tx2.insert("pqr", "aaa");
+		tx2.delete("ghi");
+
+		db.commit(&tx2).unwrap();
+
+		let records = db.iter().unwrap().map(|item| {
+			let (k, v) = item.unwrap();
+			(::std::str::from_utf8(&k).unwrap().to_string(),
+			 ::std::str::from_utf8(&v.to_vec()).unwrap().to_string())
+		});
+
+		let expected = vec![
+			("abc", "123"),
+			("def", "333"),
+			("jkl", "999"),
+			("pqr", "aaa"),
+		];
+
+		assert_eq!(
+			records.collect::<Vec<_>>(),
+			expected.iter().map(|x| (x.0.to_string(), x.1.to_string())).collect::<Vec<_>>()
+		);
+	}
 }

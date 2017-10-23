@@ -374,7 +374,9 @@ mod tests {
 				Operation::Insert(b"key" as &[u8], b"value" as &[u8]),
 				Operation::Insert(b"key2" as &[u8], b"value2" as &[u8]),
 				Operation::Delete(b"key3" as &[u8]),
-				Operation::Insert(b"key4" as &[u8], b"value4" as &[u8])]);
+				Operation::Insert(b"key4" as &[u8], b"value4" as &[u8])
+			]
+		);
 	}
 
 	#[test]
