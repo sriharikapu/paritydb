@@ -49,6 +49,15 @@ impl<'a, T: AsRef<[u8]>> PartialEq<T> for Value<'a> {
 	}
 }
 
+impl<'a> From<Record<'a>> for Value<'a> {
+	fn from(record: Record<'a>) -> Value<'a> {
+		match record.value_raw_slice() {
+			Some(raw) => Value::Raw(raw),
+			None => Value::Record(record),
+		}
+	}
+}
+
 /// A top-level database API.
 #[derive(Debug)]
 pub struct Database {
@@ -188,10 +197,7 @@ impl Database {
 		let data = unsafe { &self.mmap.as_slice()[offset..] };
 
 		match find::find_record(data, field_body_size, value_size, key.key)? {
-			find::RecordResult::Found(record) => match record.value_raw_slice() {
-				Some(raw) => Ok(Some(Value::Raw(raw))),
-				None => Ok(Some(Value::Record(record))),
-			},
+			find::RecordResult::Found(record) => Ok(Some(Value::from(record))),
 			find::RecordResult::NotFound => Ok(None),
 			find::RecordResult::OutOfRange => unimplemented!(),
 		}
@@ -291,12 +297,7 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 					v
 				};
 
-				let value = match r.value_raw_slice() {
-					Some(raw) => Value::Raw(raw),
-					None => Value::Record(r),
-				};
-
-				Some(Ok((Cow::Owned(key), value)))
+				Some(Ok((Cow::Owned(key), Value::from(r))))
 			},
 			(IteratorValue::Journal(o), IteratorValue::DB(r)) => {
 				let (res, pending) =
@@ -328,12 +329,7 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 							v
 						};
 
-						let value = match r.value_raw_slice() {
-							Some(raw) => Value::Raw(raw),
-							None => Value::Record(r),
-						};
-
-						((Cow::Owned(key), value), IteratorValue::Journal(o))
+						((Cow::Owned(key), Value::from(r)), IteratorValue::Journal(o))
 					};
 
 				self.pending = pending;
