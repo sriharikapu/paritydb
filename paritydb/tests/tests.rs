@@ -17,7 +17,7 @@ enum Action {
 use Action::*;
 
 fn run_actions(db: &mut Database, actions: &[Action]) {
-	let mut tx = Transaction::default();
+	let mut tx = db.create_transaction();
 
 	for action in actions {
 		println!("action: {:?}", action);
@@ -30,7 +30,7 @@ fn run_actions(db: &mut Database, actions: &[Action]) {
 			},
 			CommitAndFlush => {
 				db.commit(&tx).unwrap();
-				tx = Transaction::default();
+				tx = db.create_transaction();
 				db.flush_journal(1).unwrap();
 			},
 			AssertEqual(key, expected_value) => {

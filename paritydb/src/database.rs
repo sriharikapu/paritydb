@@ -135,9 +135,13 @@ impl Database {
 		})
 	}
 
+	pub fn create_transaction(&self) -> Transaction {
+		Transaction::new(self.options.external.key_len)
+	}
+
 	/// Commits changes in the transaction.
 	pub fn commit(&mut self, tx: &Transaction) -> Result<()> {
-		for op in tx.operations() {
+		for op in tx.operations()? {
 			if op.key().len() != self.options.external.key_len {
 				return Err(ErrorKind::InvalidKeyLen(self.options.external.key_len, op.key().len()).into());
 			}
@@ -356,7 +360,7 @@ mod tests {
 			..Default::default()
 		}).unwrap();
 
-		let mut tx = Transaction::default();
+		let mut tx = db.create_transaction();
 		tx.insert("abc", "xyz");
 		tx.insert("cde", "123");
 
@@ -366,7 +370,7 @@ mod tests {
 		assert_eq!(db.get("cde").unwrap().unwrap(), b"123");
 
 		// Another transaction
-		let mut tx = Transaction::default();
+		let mut tx = db.create_transaction();
 		tx.insert("abc", "456");
 		tx.delete("cde");
 
@@ -392,7 +396,7 @@ mod tests {
 			..Default::default()
 		}).unwrap();
 
-		let mut tx = Transaction::default();
+		let mut tx = db.create_transaction();
 		tx.insert("abcdef", "456");
 
 		assert_eq!(*db.commit(&tx).unwrap_err().kind(), ErrorKind::InvalidKeyLen(3, 6));
@@ -421,7 +425,7 @@ mod tests {
 			..Default::default()
 		}).unwrap();
 
-		let mut tx = Transaction::default();
+		let mut tx = db.create_transaction();
 		tx.insert("abc", "123");
 		tx.delete("abc");
 

@@ -35,7 +35,7 @@ fn do_get(db: &str, key: &str) -> Result<(), Error> {
 fn do_insert(db: &str, key: &str, value: &str) -> Result<(), Error> {
 	let mut db = Database::open(db, Options::default())
 				.or(Database::create(db, Options::default()))?;
-	let mut tx = Transaction::default();
+	let mut tx = db.create_transaction();
 	tx.insert(key, value);
 	db.commit(&tx)?;
 	db.flush_journal(1)?;
@@ -44,7 +44,7 @@ fn do_insert(db: &str, key: &str, value: &str) -> Result<(), Error> {
 
 fn do_delete(db: &str, key: &str) -> Result<(), Error> {
 	let mut db = Database::open(db, Options::default())?;
-	let mut tx = Transaction::default();
+	let mut tx = db.create_transaction();
 	tx.delete(key);
 	db.commit(&tx)?;
 	db.flush_journal(1)?;

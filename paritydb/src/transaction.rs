@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use byteorder::{LittleEndian, ByteOrder, WriteBytesExt};
+use error::{ErrorKind, Result};
 
 /// Database operations
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -57,34 +58,65 @@ impl<'a> Operation<'a> {
 
 /// Database operations.
 pub struct Transaction {
+	/// key length, it's used to determine whether an insert
+	/// is valid or not at an early stage, we could probably
+	/// use `Option` or `InternalOption` here, but right now
+	/// we only care about key size, so it's enough info.
+	key_len: usize,
+	first_invalid_key_len: Option<usize>,
 	operations: Vec<u8>,
 }
 
-impl Default for Transaction {
-	fn default() -> Self {
+impl Transaction {
+	/// This should only be called in `Database` and some unit tests.
+	/// Use `db.create_transaction()` in any other cases.
+	pub(crate) fn new(key_len: usize) -> Transaction {
 		Transaction {
+			key_len: key_len,
+			first_invalid_key_len: None,
 			operations: Vec::new(),
 		}
 	}
-}
 
-impl Transaction {
 	/// Append new insert operation to the list of transactions.
 	#[inline]
 	pub fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(&mut self, key: K, value: V) {
-		self.push(Operation::Insert(key.as_ref(), value.as_ref()));
+		if self.first_invalid_key_len.is_some() {
+			// there's already something wrong here
+			return;
+		}
+
+		let key = key.as_ref();
+		if key.len() != self.key_len {
+			self.first_invalid_key_len = Some(key.len());
+		} else {
+			self.push(Operation::Insert(key, value.as_ref()));
+		}
 	}
 
 	/// Append new delete operation to the list of transactions.
 	#[inline]
 	pub fn delete<K: AsRef<[u8]>>(&mut self, key: K) {
-		self.push(Operation::Delete(key.as_ref()));
+		if self.first_invalid_key_len.is_some() {
+			// there's already something wrong here
+			return;
+		}
+
+		let key = key.as_ref();
+		if key.len() != self.key_len {
+			self.first_invalid_key_len = Some(key.len());
+		} else {
+			self.push(Operation::Delete(key));
+		}
 	}
 
 	/// Returns double-ended iterator over all operations in a transaction.
-	pub fn operations(&self) -> OperationsIterator {
-		OperationsIterator {
-			data: &self.operations,
+	pub fn operations(&self) -> Result<OperationsIterator> {
+		match self.first_invalid_key_len {
+			Some(invalid_key_len) => Err(ErrorKind::InvalidKeyLen(self.key_len, invalid_key_len).into()),
+			None => Ok(OperationsIterator {
+				data: &self.operations,
+			})
 		}
 	}
 
@@ -149,14 +181,28 @@ mod tests {
 
 	#[test]
 	fn test_transaction() {
-		let mut t = Transaction::default();
+		let mut t = Transaction::new(3);
 		t.insert(b"key", b"value");
 		t.delete(b"key");
 
-		let mut operations = t.operations();
+		let mut operations = t.operations().unwrap();
 
 		assert_eq!(operations.next(), Some(Operation::Insert(b"key", b"value")));
 		assert_eq!(operations.next(), Some(Operation::Delete(b"key")));
 		assert_eq!(operations.next(), None);
+	}
+
+	#[test]
+	fn test_transaction_invalid_key_len_for_insert() {
+		let mut t = Transaction::new(4);
+		t.insert(b"key", b"value");
+		assert!(t.operations().is_err());
+	}
+
+	#[test]
+	fn test_transaction_invalid_key_len_for_delete() {
+		let mut t = Transaction::new(4);
+		t.delete(b"key");
+		assert!(t.operations().is_err());
 	}
 }
