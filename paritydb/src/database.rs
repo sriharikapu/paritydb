@@ -314,14 +314,18 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 					return handle_db_record(r, self.key_size);
 				},
 				(IteratorValue::Journal(o), IteratorValue::DB(r)) => {
-					match r.key_cmp(o.key()) {
-						Some(Ordering::Equal) => {
+					let ord = r.key_cmp(o.key()).expect(
+						"only returns None when compared keys don't have the same size; \
+						 all keys should have the same size; qed");
+
+					match ord {
+						Ordering::Equal => {
 							match handle_journal_operation(o) {
 								None => continue,
 								s => return s,
 							};
 						},
-						Some(Ordering::Greater) => {
+						Ordering::Greater => {
 							self.pending = IteratorValue::DB(r);
 
 							match handle_journal_operation(o) {
@@ -329,17 +333,15 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 								s => return s,
 							};
 						},
-						Some(Ordering::Less) => {
+						Ordering::Less => {
 							self.pending = IteratorValue::Journal(o);
 
 							return handle_db_record(r, self.key_size);
 						},
-						None => unreachable!("only returned when compared keys don't have the same size; \
-											  all keys should have the same size; qed"),
 					};
 				},
 				(IteratorValue::None, IteratorValue::None) => return None,
-				_ => unreachable!()
+				(o, r) => unreachable!("operation: {:?}, record: {:?}", o, r)
 			};
 		}
 	}
