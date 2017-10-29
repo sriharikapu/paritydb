@@ -401,7 +401,7 @@ mod tests {
 		// Try to open era
 		assert_eq!(JournalEra::open(&path).unwrap_err().kind(), &ErrorKind::CorruptedJournal(
 			path,
-			"Expected: [69 53 c1 6d b6 8a 85 9a b9 d8 b3 da 13 1d ba 6b 2a 17 d9 84 8d bf 6e d4 c0 d6 64 5d b3 98 5d c], Got: [1 2 3 6d b6 8a 85 9a b9 d8 b3 da 13 1d ba 6b 2a 17 d9 84 8d bf 6e d4 c0 d6 64 5d b3 98 5d c]".into()
+			"Expected: [69 53 c1 6d b6 8a 85 9a b9 d8 b3 da 13 1d ba 6b 2a 17 d9 84 8d bf 6e d4 c0 d6 64 5d b3 98 5d 0c], Got: [01 02 03 6d b6 8a 85 9a b9 d8 b3 da 13 1d ba 6b 2a 17 d9 84 8d bf 6e d4 c0 d6 64 5d b3 98 5d 0c]".into()
 		));
 	}
 }
