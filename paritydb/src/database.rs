@@ -215,7 +215,7 @@ impl Database {
 		let journal_iter = self.journal.iter();
 		let pending = IteratorValue::None;
 
-		Ok(DatabaseIterator { record_iter, journal_iter, key_size, pending })
+		Ok(DatabaseIterator { record_iter, journal_iter, pending })
 	}
 }
 
@@ -235,7 +235,6 @@ impl<'a> IteratorValue<'a> {
 pub struct DatabaseIterator<'a> {
 	journal_iter: btree_set::IntoIter<Operation<'a>>,
 	record_iter: find::RecordIterator<'a>,
-	key_size: usize,
 	pending: IteratorValue<'a>,
 }
 

@@ -27,6 +27,8 @@ pub struct Record<'a> {
 impl<'a> Record<'a> {
 	/// Creates new record given the data slice, field body and value and key size.
 	pub fn new(data: &'a [u8], field_body_size: usize, value_size: ValueSize, key_size: usize) -> Self {
+		assert!(key_size <= field_body_size);
+
 		let view = FieldsView::new(data, field_body_size);
 		let (key, rest) = view.split_at(key_size);
 
