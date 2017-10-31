@@ -79,6 +79,13 @@ impl<'a> Record<'a> {
 		self.value == slice
 	}
 
+	/// Returns underlying key.
+	pub fn key_raw_slice(&self) -> &'a [u8] {
+		self.key.raw_slice()
+			.expect("only returns None when addressed value isn't stored in a single field; \
+					 keys are always stored in a single field; qed")
+	}
+
 	/// Returns underlying value if it is a continuous slice of memory,
 	/// otherwise returns None.
 	pub fn value_raw_slice(&self) -> Option<&'a [u8]> {

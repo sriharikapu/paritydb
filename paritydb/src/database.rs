@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::btree_set;
 use std::io::Write;
@@ -241,7 +240,7 @@ pub struct DatabaseIterator<'a> {
 }
 
 impl<'a> Iterator for DatabaseIterator<'a> {
-	type Item = Result<(Cow<'a, [u8]>, Value<'a>)>;
+	type Item = Result<(&'a [u8], Value<'a>)>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		loop {
@@ -280,27 +279,15 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 
 			#[inline]
 			// returns `None` if the operation is a `Delete` and we should skip to the next value
-			fn handle_journal_operation<'a>(o: Operation<'a>) -> Option<Result<(Cow<'a, [u8]>, Value<'a>)>> {
+			fn handle_journal_operation<'a>(o: Operation<'a>) -> Option<Result<(&'a [u8], Value<'a>)>> {
 				match o {
 					Operation::Delete(_) => {
 						None
 					},
 					Operation::Insert(key, value) => {
-						Some(Ok((Cow::Borrowed(key), Value::Raw(value))))
+						Some(Ok((key, Value::Raw(value))))
 					},
 				}
-			}
-
-			#[inline]
-			fn handle_db_record<'a>(r: Record<'a>, key_size: usize) -> Option<Result<(Cow<'a, [u8]>, Value<'a>)>> {
-				let key = {
-					let mut v = Vec::with_capacity(key_size);
-					v.resize(key_size, 0);
-					r.read_key(&mut v);
-					v
-				};
-
-				Some(Ok((Cow::Owned(key), Value::from(r))))
 			}
 
 			match (operation, record) {
@@ -311,7 +298,7 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 					};
 				},
 				(IteratorValue::None, IteratorValue::DB(r)) => {
-					return handle_db_record(r, self.key_size);
+					return Some(Ok((r.key_raw_slice(), Value::from(r))));
 				},
 				(IteratorValue::Journal(o), IteratorValue::DB(r)) => {
 					let ord = r.key_cmp(o.key()).expect(
@@ -335,8 +322,7 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 						},
 						Ordering::Less => {
 							self.pending = IteratorValue::Journal(o);
-
-							return handle_db_record(r, self.key_size);
+							return Some(Ok((r.key_raw_slice(), Value::from(r))));
 						},
 					};
 				},
