@@ -319,11 +319,11 @@ mod tests {
 		path.push("file");
 
 		let mut tx = Transaction::new(4);
-		tx.insert(b"key1", b"value");
-		tx.insert(b"key2", b"value");
-		tx.insert(b"key3", b"value");
-		tx.insert(b"key2", b"value2");
-		tx.delete(b"key3");
+		tx.insert(b"key1", b"value").unwrap();
+		tx.insert(b"key2", b"value").unwrap();
+		tx.insert(b"key3", b"value").unwrap();
+		tx.insert(b"key2", b"value2").unwrap();
+		tx.delete(b"key3").unwrap();
 
 		let era = JournalEra::create(path, &tx).unwrap();
 		assert_eq!(JournalOperation::Insert(b"value" as &[u8]), era.get(b"key1").unwrap());
@@ -386,11 +386,11 @@ mod tests {
 		path.push("file");
 
 		let mut tx = Transaction::new(4);
-		tx.insert(b"key1", b"value");
-		tx.insert(b"key2", b"value");
-		tx.insert(b"key3", b"value");
-		tx.insert(b"key2", b"value2");
-		tx.delete(b"key3");
+		tx.insert(b"key1", b"value").unwrap();
+		tx.insert(b"key2", b"value").unwrap();
+		tx.insert(b"key3", b"value").unwrap();
+		tx.insert(b"key2", b"value2").unwrap();
+		tx.delete(b"key3").unwrap();
 		let _ = JournalEra::create(&path, &tx).unwrap();
 
 		// alter hash

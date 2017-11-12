@@ -3,7 +3,7 @@ extern crate paritydb;
 
 use std::fs;
 use tempdir::TempDir;
-use paritydb::{Database, Options, Transaction, ValuesLen};
+use paritydb::{Database, Options, ValuesLen};
 
 #[derive(Debug)]
 enum Action {
@@ -23,10 +23,10 @@ fn run_actions(db: &mut Database, actions: &[Action]) {
 		println!("action: {:?}", action);
 		match *action {
 			Insert(key, value) => {
-				tx.insert(key, value)
+				tx.insert(key, value).unwrap();
 			},
 			Delete(key) => {
-				tx.delete(key)
+				tx.delete(key).unwrap();
 			},
 			CommitAndFlush => {
 				db.commit(&tx).unwrap();

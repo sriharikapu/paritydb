@@ -135,17 +135,13 @@ impl Database {
 		})
 	}
 
+	/// Create a new transaction.
 	pub fn create_transaction(&self) -> Transaction {
 		Transaction::new(self.options.external.key_len)
 	}
 
 	/// Commits changes in the transaction.
 	pub fn commit(&mut self, tx: &Transaction) -> Result<()> {
-		for op in tx.operations()? {
-			if op.key().len() != self.options.external.key_len {
-				return Err(ErrorKind::InvalidKeyLen(self.options.external.key_len, op.key().len()).into());
-			}
-		}
 		self.journal.push(tx)?;
 		Ok(())
 	}
@@ -347,7 +343,6 @@ mod tests {
 	use super::{Database, Options};
 	use options::ValuesLen;
 	use error::ErrorKind;
-	use transaction::Transaction;
 
 	#[test]
 	fn create_insert_and_query() {
@@ -361,8 +356,8 @@ mod tests {
 		}).unwrap();
 
 		let mut tx = db.create_transaction();
-		tx.insert("abc", "xyz");
-		tx.insert("cde", "123");
+		tx.insert("abc", "xyz").unwrap();
+		tx.insert("cde", "123").unwrap();
 
 		db.commit(&tx).unwrap();
 
@@ -371,8 +366,8 @@ mod tests {
 
 		// Another transaction
 		let mut tx = db.create_transaction();
-		tx.insert("abc", "456");
-		tx.delete("cde");
+		tx.insert("abc", "456").unwrap();
+		tx.delete("cde").unwrap();
 
 		db.commit(&tx).unwrap();
 
@@ -390,16 +385,14 @@ mod tests {
 	fn validate_key_length_at_insert() {
 		let temp = tempdir::TempDir::new("validate_key_length").unwrap();
 
-		let mut db = Database::create(temp.path(), Options {
+		let db = Database::create(temp.path(), Options {
 			journal_eras: 0,
 			key_len: 3,
 			..Default::default()
 		}).unwrap();
 
 		let mut tx = db.create_transaction();
-		tx.insert("abcdef", "456");
-
-		assert_eq!(*db.commit(&tx).unwrap_err().kind(), ErrorKind::InvalidKeyLen(3, 6));
+		assert_eq!(*tx.insert("abcdef", "456").unwrap_err().kind(), ErrorKind::InvalidKeyLen(3, 6));
 	}
 
 	#[test]
@@ -426,8 +419,8 @@ mod tests {
 		}).unwrap();
 
 		let mut tx = db.create_transaction();
-		tx.insert("abc", "123");
-		tx.delete("abc");
+		tx.insert("abc", "123").unwrap();
+		tx.delete("abc").unwrap();
 
 		db.commit(&tx).unwrap();
 		db.flush_journal(1).unwrap();

@@ -63,7 +63,6 @@ pub struct Transaction {
 	/// use `Option` or `InternalOption` here, but right now
 	/// we only care about key size, so it's enough info.
 	key_len: usize,
-	first_invalid_key_len: Option<usize>,
 	operations: Vec<u8>,
 }
 
@@ -73,50 +72,38 @@ impl Transaction {
 	pub(crate) fn new(key_len: usize) -> Transaction {
 		Transaction {
 			key_len: key_len,
-			first_invalid_key_len: None,
 			operations: Vec::new(),
 		}
 	}
 
 	/// Append new insert operation to the list of transactions.
 	#[inline]
-	pub fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(&mut self, key: K, value: V) {
-		if self.first_invalid_key_len.is_some() {
-			// there's already something wrong here
-			return;
-		}
-
+	pub fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(&mut self, key: K, value: V) -> Result<()> {
 		let key = key.as_ref();
 		if key.len() != self.key_len {
-			self.first_invalid_key_len = Some(key.len());
+			Err(ErrorKind::InvalidKeyLen(self.key_len, key.len()).into())
 		} else {
 			self.push(Operation::Insert(key, value.as_ref()));
+			Ok(())
 		}
 	}
 
 	/// Append new delete operation to the list of transactions.
 	#[inline]
-	pub fn delete<K: AsRef<[u8]>>(&mut self, key: K) {
-		if self.first_invalid_key_len.is_some() {
-			// there's already something wrong here
-			return;
-		}
-
+	pub fn delete<K: AsRef<[u8]>>(&mut self, key: K) -> Result<()> {
 		let key = key.as_ref();
 		if key.len() != self.key_len {
-			self.first_invalid_key_len = Some(key.len());
+			Err(ErrorKind::InvalidKeyLen(self.key_len, key.len()).into())
 		} else {
 			self.push(Operation::Delete(key));
+			Ok(())
 		}
 	}
 
 	/// Returns double-ended iterator over all operations in a transaction.
-	pub fn operations(&self) -> Result<OperationsIterator> {
-		match self.first_invalid_key_len {
-			Some(invalid_key_len) => Err(ErrorKind::InvalidKeyLen(self.key_len, invalid_key_len).into()),
-			None => Ok(OperationsIterator {
-				data: &self.operations,
-			})
+	pub fn operations(&self) -> OperationsIterator {
+		OperationsIterator {
+			data: &self.operations,
 		}
 	}
 
@@ -182,10 +169,10 @@ mod tests {
 	#[test]
 	fn test_transaction() {
 		let mut t = Transaction::new(3);
-		t.insert(b"key", b"value");
-		t.delete(b"key");
+		t.insert(b"key", b"value").unwrap();
+		t.delete(b"key").unwrap();
 
-		let mut operations = t.operations().unwrap();
+		let mut operations = t.operations();
 
 		assert_eq!(operations.next(), Some(Operation::Insert(b"key", b"value")));
 		assert_eq!(operations.next(), Some(Operation::Delete(b"key")));
@@ -195,14 +182,12 @@ mod tests {
 	#[test]
 	fn test_transaction_invalid_key_len_for_insert() {
 		let mut t = Transaction::new(4);
-		t.insert(b"key", b"value");
-		assert!(t.operations().is_err());
+		assert!(t.insert(b"key", b"value").is_err());
 	}
 
 	#[test]
 	fn test_transaction_invalid_key_len_for_delete() {
 		let mut t = Transaction::new(4);
-		t.delete(b"key");
-		assert!(t.operations().is_err());
+		assert!(t.delete(b"key").is_err());
 	}
 }
