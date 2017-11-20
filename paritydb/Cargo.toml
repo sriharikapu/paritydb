@@ -7,7 +7,7 @@ authors = ["debris <marek.kotewicz@gmail.com>"]
 bit-vec = "0.4.4"
 byteorder = "1.1"
 error-chain = "0.11"
-hex-slice = "0.1.0"
+hex-slice = "=0.1.2"
 memmap = "0.5.2"
 parking_lot = "0.4.8"
 tiny-keccak = "1.3"
