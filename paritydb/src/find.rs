@@ -2,6 +2,7 @@ use std::cmp;
 
 use field::iterator::FieldHeaderIterator;
 use field::{Error, Header, field_size};
+use prefix_tree::OccupiedOffsetIterator;
 use record::{ValueSize, Record};
 
 /// Record location.
@@ -47,9 +48,86 @@ pub fn find_record<'a>(
 	Ok(RecordResult::OutOfRange)
 }
 
+pub fn iter<'a>(
+	data: &'a [u8],
+	occupied_offset_iter: OccupiedOffsetIterator<'a>,
+	field_body_size: usize,
+	key_size: usize,
+	value_size: ValueSize
+) -> Result<RecordIterator<'a>, Error> {
+	let offset = 0;
+	let peek_offset = None;
+	let field_size = field_size(field_body_size);
+
+	Ok(RecordIterator { data, occupied_offset_iter, offset, peek_offset, field_body_size, field_size, key_size, value_size })
+}
+
+pub struct RecordIterator<'a, T = OccupiedOffsetIterator<'a>> {
+	data: &'a [u8],
+	occupied_offset_iter: T,
+	offset: u32,
+	peek_offset: Option<u32>,
+	field_body_size: usize,
+	field_size: usize,
+	key_size: usize,
+	value_size: ValueSize
+}
+
+impl<'a, T: Iterator<Item=u32>> Iterator for RecordIterator<'a, T> {
+	type Item = Result<Record<'a>, Error>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		loop {
+			if let None = self.peek_offset {
+				let occupied_offset = self.occupied_offset_iter.next();
+
+				if let Some(occupied_offset) = occupied_offset {
+					if occupied_offset < self.offset {
+						continue;
+					}
+				}
+
+				self.peek_offset = occupied_offset;
+				self.offset = self.peek_offset.unwrap_or(self.offset);
+			}
+
+			match self.peek_offset {
+				Some(offset) => {
+					// reached eof
+					if offset as usize * self.field_size >= self.data.len() { return None }
+
+					self.offset += 1;
+
+					let slice = &self.data[offset as usize * self.field_size..];
+
+					let header = match Header::from_u8(slice[0]) {
+						Ok(header) => header,
+						Err(err) => return Some(Err(err)),
+					};
+
+					match header {
+						Header::Uninitialized => {
+							self.peek_offset = None;
+						},
+						Header::Continued => {
+							self.peek_offset = Some(offset + 1);
+						},
+						Header::Inserted => {
+							self.peek_offset = Some(offset + 1);
+							let record = Record::new(slice, self.field_body_size, self.value_size, self.key_size);
+							return Some(Ok(record))
+						}
+					}
+				},
+				_ => return None
+			}
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
-	use super::{find_record, RecordResult};
+	use super::{find_record, RecordIterator, RecordResult};
 	use record;
 
 	fn expect_record(a: RecordResult, key: &[u8], value: &[u8]) {
@@ -125,5 +203,48 @@ mod tests {
 
 		assert_eq(location, find_record(&data, body_size, value_size, &key).unwrap());
 		assert_eq(location2, find_record(&data, body_size, value_size, &key2).unwrap());
+	}
+
+	#[test]
+	fn test_iter() {
+		let data = &[1, 1, 1, 0, 0, 0, 1, 2, 2, 1, 3, 3, 0, 0, 0, 0, 0, 0, 1, 4, 4, 1, 5, 5];
+		let occupied_offset_iter = vec![0u32, 2u32, 3u32, 6u32].into_iter();
+
+		let offset = 0;
+		let peek_offset = None;
+		let field_body_size = 2;
+		let field_size = 3;
+		let key_size = 2;
+		let value_size = record::ValueSize::Constant(0);
+
+		let records = RecordIterator {
+			data,
+			occupied_offset_iter,
+			offset,
+			peek_offset,
+			field_body_size,
+			field_size,
+			key_size,
+			value_size,
+		};
+
+		let keys: Vec<_> = records.map(|record| {
+			let record = record.unwrap();
+			let mut v = Vec::with_capacity(key_size);
+			v.resize(key_size, 0);
+			record.read_key(&mut v);
+			v
+		}).collect();
+
+		assert_eq!(
+			keys,
+			vec![
+				vec![1, 1],
+				vec![2, 2],
+				vec![3, 3],
+				vec![4, 4],
+				vec![5, 5]
+			]
+		);
 	}
 }

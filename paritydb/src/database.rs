@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+use std::collections::btree_set;
 use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::{cmp, fs};
@@ -12,7 +14,7 @@ use key::Key;
 use metadata::{self, Metadata};
 use options::{Options, InternalOptions};
 use record::Record;
-use transaction::Transaction;
+use transaction::{Operation, Transaction};
 
 /// A database record value.
 #[derive(Debug, PartialEq)]
@@ -43,6 +45,15 @@ impl<'a, T: AsRef<[u8]>> PartialEq<T> for Value<'a> {
 		match *self {
 			Value::Raw(slice) => slice == other.as_ref(),
 			Value::Record(ref record) => record.value_is_equal(other.as_ref()),
+		}
+	}
+}
+
+impl<'a> From<Record<'a>> for Value<'a> {
+	fn from(record: Record<'a>) -> Value<'a> {
+		match record.value_raw_slice() {
+			Some(raw) => Value::Raw(raw),
+			None => Value::Record(record),
 		}
 	}
 }
@@ -186,12 +197,137 @@ impl Database {
 		let data = unsafe { &self.mmap.as_slice()[offset..] };
 
 		match find::find_record(data, field_body_size, value_size, key.key)? {
-			find::RecordResult::Found(record) => match record.value_raw_slice() {
-				Some(raw) => Ok(Some(Value::Raw(raw))),
-				None => Ok(Some(Value::Record(record))),
-			},
+			find::RecordResult::Found(record) => Ok(Some(Value::from(record))),
 			find::RecordResult::NotFound => Ok(None),
 			find::RecordResult::OutOfRange => unimplemented!(),
+		}
+	}
+
+	/// Returns an iterator over the database key-value pairs.
+	pub fn iter(&self) -> Result<DatabaseIterator> {
+		let data = unsafe { &self.mmap.as_slice() };
+		let occupied_offset_iter = self.metadata.prefixes.offset_iter();
+		let field_body_size = self.options.field_body_size;
+		let key_size = self.options.external.key_len;
+		let value_size = self.options.value_size;
+
+		let record_iter = find::iter(data, occupied_offset_iter, field_body_size, key_size, value_size)?;
+		let journal_iter = self.journal.iter();
+		let pending = IteratorValue::None;
+
+		Ok(DatabaseIterator { record_iter, journal_iter, pending })
+	}
+}
+
+#[derive(Debug)]
+enum IteratorValue<'a> {
+	None,
+	Journal(Operation<'a>),
+	DB(Record<'a>),
+}
+
+impl<'a> IteratorValue<'a> {
+	fn take(&mut self) -> Self {
+		::std::mem::replace(self, IteratorValue::None)
+	}
+}
+
+pub struct DatabaseIterator<'a> {
+	journal_iter: btree_set::IntoIter<Operation<'a>>,
+	record_iter: find::RecordIterator<'a>,
+	pending: IteratorValue<'a>,
+}
+
+impl<'a> Iterator for DatabaseIterator<'a> {
+	type Item = Result<(&'a [u8], Value<'a>)>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		loop {
+			let (operation, record) = match self.pending.take() {
+				IteratorValue::None => {
+					let j = self.journal_iter.next().map_or(IteratorValue::None, IteratorValue::Journal);
+					let db = match self.record_iter.next() {
+						None => IteratorValue::None,
+						Some(Ok(r)) => IteratorValue::DB(r),
+						Some(Err(err)) => {
+							self.pending = j;
+							return Some(Err(err.into()));
+						},
+					};
+
+					(j, db)
+				},
+				j @ IteratorValue::Journal(_) => {
+					let db = match self.record_iter.next() {
+						None => IteratorValue::None,
+						Some(Ok(r)) => IteratorValue::DB(r),
+						Some(Err(err)) => {
+							self.pending = j;
+							return Some(Err(err.into()));
+						},
+					};
+
+					(j, db)
+				},
+				db @ IteratorValue::DB(_) => {
+					let j = self.journal_iter.next().map_or(IteratorValue::None, IteratorValue::Journal);
+
+					(j, db)
+				},
+			};
+
+			#[inline]
+			// returns `None` if the operation is a `Delete` and we should skip to the next value
+			fn handle_journal_operation<'a>(o: Operation<'a>) -> Option<Result<(&'a [u8], Value<'a>)>> {
+				match o {
+					Operation::Delete(_) => {
+						None
+					},
+					Operation::Insert(key, value) => {
+						Some(Ok((key, Value::Raw(value))))
+					},
+				}
+			}
+
+			match (operation, record) {
+				(IteratorValue::Journal(o), IteratorValue::None) => {
+					match handle_journal_operation(o) {
+						None => continue,
+						s => return s,
+					};
+				},
+				(IteratorValue::None, IteratorValue::DB(r)) => {
+					return Some(Ok((r.key_raw_slice(), Value::from(r))));
+				},
+				(IteratorValue::Journal(o), IteratorValue::DB(r)) => {
+					let ord = r.key_cmp(o.key()).expect(
+						"only returns None when compared keys don't have the same size; \
+						 all keys should have the same size; qed");
+
+					match ord {
+						Ordering::Equal => {
+							match handle_journal_operation(o) {
+								None => continue,
+								s => return s,
+							};
+						},
+						Ordering::Greater => {
+							self.pending = IteratorValue::DB(r);
+
+							match handle_journal_operation(o) {
+								None => continue,
+								s => return s,
+							};
+						},
+						Ordering::Less => {
+							self.pending = IteratorValue::Journal(o);
+							return Some(Ok((r.key_raw_slice(), Value::from(r))));
+						},
+					};
+				},
+				(IteratorValue::None, IteratorValue::None) => return None,
+				(o, r) => unreachable!("operation: {:?}, record: {:?}", o, r)
+			};
 		}
 	}
 }
@@ -273,5 +409,51 @@ mod tests {
 		db.flush_journal(1).unwrap();
 
 		assert_eq!(db.get("abc").unwrap(), None);
+	}
+
+	#[test]
+	fn test_iter() {
+		let temp = tempdir::TempDir::new("test_iter").unwrap();
+
+		let mut db = Database::create(temp.path(), Options {
+			journal_eras: 0,
+			key_len: 3,
+			value_len: ValuesLen::Constant(3),
+			..Default::default()
+		}).unwrap();
+
+		let mut tx1 = Transaction::default();
+		tx1.insert("abc", "123");
+		tx1.insert("def", "467");
+		tx1.insert("ghi", "zzz");
+
+		db.commit(&tx1).unwrap();
+		db.flush_journal(1).unwrap();
+
+		let mut tx2 = Transaction::default();
+		tx2.insert("jkl", "999");
+		tx2.insert("def", "333");
+		tx2.insert("pqr", "aaa");
+		tx2.delete("ghi");
+
+		db.commit(&tx2).unwrap();
+
+		let records = db.iter().unwrap().map(|item| {
+			let (k, v) = item.unwrap();
+			(::std::str::from_utf8(&k).unwrap().to_string(),
+			 ::std::str::from_utf8(&v.to_vec()).unwrap().to_string())
+		});
+
+		let expected = vec![
+			("abc", "123"),
+			("def", "333"),
+			("jkl", "999"),
+			("pqr", "aaa"),
+		];
+
+		assert_eq!(
+			records.collect::<Vec<_>>(),
+			expected.iter().map(|x| (x.0.to_string(), x.1.to_string())).collect::<Vec<_>>()
+		);
 	}
 }

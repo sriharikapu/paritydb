@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use byteorder::{LittleEndian, ByteOrder};
 
 use field::view::FieldsView;
@@ -25,6 +27,8 @@ pub struct Record<'a> {
 impl<'a> Record<'a> {
 	/// Creates new record given the data slice, field body and value and key size.
 	pub fn new(data: &'a [u8], field_body_size: usize, value_size: ValueSize, key_size: usize) -> Self {
+		assert!(key_size <= field_body_size);
+
 		let view = FieldsView::new(data, field_body_size);
 		let (key, rest) = view.split_at(key_size);
 
@@ -67,9 +71,21 @@ impl<'a> Record<'a> {
 		self.key > slice
 	}
 
+	/// Returns an ordering between self and the given slice if both have the same length.
+	pub fn key_cmp(&self, slice: &[u8]) -> Option<Ordering> {
+		self.key.partial_cmp(&slice)
+	}
+
 	/// Returns true of record value is equal to given slice.
 	pub fn value_is_equal(&self, slice: &[u8]) -> bool {
 		self.value == slice
+	}
+
+	/// Returns underlying key.
+	pub fn key_raw_slice(&self) -> &'a [u8] {
+		self.key.raw_slice()
+			.expect("only returns None when addressed value isn't stored in a single field; \
+					 keys are always stored in a single field; qed")
 	}
 
 	/// Returns underlying value if it is a continuous slice of memory,
