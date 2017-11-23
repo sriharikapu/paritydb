@@ -1,0 +1,9 @@
+[package]
+name = "quickchecks"
+version = "0.1.0"
+authors = ["debris <marek.kotewicz@gmail.com>"]
+
+[dev-dependencies]
+paritydb = { path = "../paritydb" }
+tempdir = "0.3.5"
+quickcheck = "0.4"
