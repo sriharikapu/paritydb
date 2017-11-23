@@ -92,7 +92,14 @@ impl InternalOptions {
 			).into());
 		}
 
-		if external.key_index_bits > 32 || external.key_index_bits == 0 {
+		if external.key_index_bits == 0 {
+			return Err(ErrorKind::InvalidOptions(
+				"key_index_bits",
+				String::from("must not be 0.")
+			).into());
+		}
+
+		if external.key_index_bits > 32 {
 			return Err(ErrorKind::InvalidOptions(
 				"key_index_bits",
 				format!("{} is too large. Only prefixes up to 32 bits are supported.", external.key_index_bits)
