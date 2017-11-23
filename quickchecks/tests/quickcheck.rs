@@ -29,7 +29,7 @@ quickcheck! {
             return TestResult::discard();
         }
 
-        let temp = TempDir::new("quickcheck").unwrap();
+        let temp = TempDir::new("quickcheck_can_get_inserted_value").unwrap();
         let mut db = Database::create(temp.path(), Options {
             journal_eras: 0,
             key_len: key.len(),
