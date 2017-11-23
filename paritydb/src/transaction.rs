@@ -60,7 +60,7 @@ impl<'a> Operation<'a> {
 pub struct Transaction {
 	/// key length, it's used to determine whether an insert
 	/// is valid or not at an early stage, we could probably
-	/// use `Option` or `InternalOption` here, but right now
+	/// use `Options` or `InternalOptions` here, but right now
 	/// we only care about key size, so it's enough info.
 	key_len: usize,
 	operations: Vec<u8>,
