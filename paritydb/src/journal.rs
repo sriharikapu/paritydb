@@ -353,15 +353,15 @@ mod tests {
 
 		let mut journal = Journal::open(temp.path()).unwrap();
 
-		let mut tx1 = Transaction::default();
-		tx1.insert(b"key", b"value");
-		tx1.insert(b"key2", b"value");
-		tx1.insert(b"key3", b"value");
+		let mut tx1 = Transaction::new(4);
+		tx1.insert(b"key1", b"value").unwrap();
+		tx1.insert(b"key2", b"value").unwrap();
+		tx1.insert(b"key3", b"value").unwrap();
 
-		let mut tx2 = Transaction::default();
-		tx2.insert(b"key2", b"value2");
-		tx2.delete(b"key3");
-		tx2.insert(b"key4", b"value4");
+		let mut tx2 = Transaction::new(4);
+		tx2.insert(b"key2", b"value2").unwrap();
+		tx2.delete(b"key3").unwrap();
+		tx2.insert(b"key4", b"value4").unwrap();
 
 		journal.push(&tx1).unwrap();
 		journal.push(&tx2).unwrap();
@@ -371,7 +371,7 @@ mod tests {
 		assert_eq!(
 			journal.iter().collect::<Vec<_>>(),
 			vec![
-				Operation::Insert(b"key" as &[u8], b"value" as &[u8]),
+				Operation::Insert(b"key1" as &[u8], b"value" as &[u8]),
 				Operation::Insert(b"key2" as &[u8], b"value2" as &[u8]),
 				Operation::Delete(b"key3" as &[u8]),
 				Operation::Insert(b"key4" as &[u8], b"value4" as &[u8])

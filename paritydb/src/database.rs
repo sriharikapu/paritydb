@@ -439,19 +439,19 @@ mod tests {
 			..Default::default()
 		}).unwrap();
 
-		let mut tx1 = Transaction::default();
-		tx1.insert("abc", "123");
-		tx1.insert("def", "467");
-		tx1.insert("ghi", "zzz");
+		let mut tx1 = db.create_transaction();
+		tx1.insert("abc", "123").unwrap();
+		tx1.insert("def", "467").unwrap();
+		tx1.insert("ghi", "zzz").unwrap();
 
 		db.commit(&tx1).unwrap();
 		db.flush_journal(1).unwrap();
 
-		let mut tx2 = Transaction::default();
-		tx2.insert("jkl", "999");
-		tx2.insert("def", "333");
-		tx2.insert("pqr", "aaa");
-		tx2.delete("ghi");
+		let mut tx2 = db.create_transaction();
+		tx2.insert("jkl", "999").unwrap();
+		tx2.insert("def", "333").unwrap();
+		tx2.insert("pqr", "aaa").unwrap();
+		tx2.delete("ghi").unwrap();
 
 		db.commit(&tx2).unwrap();
 
