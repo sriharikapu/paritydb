@@ -80,30 +80,30 @@ pub struct InternalOptions {
 impl InternalOptions {
 	pub fn from_external(external: Options) -> Result<Self> {
 		if external.extend_threshold_percent > 100 || external.extend_threshold_percent == 0 {
-			return Err(ErrorKind::InvalidOptions(
+			bail!(ErrorKind::InvalidOptions(
 				"extend_threshold_percent",
 				format!("Not satisfied: 0 < {} <= 100", external.extend_threshold_percent)
-			).into());
+			));
 		}
 		if external.key_index_bits as usize >  external.key_len * 8 {
-			return Err(ErrorKind::InvalidOptions(
+			bail!(ErrorKind::InvalidOptions(
 				"key_index_bits",
 				format!("{} is greater than key length: {}", external.key_index_bits, external.key_len * 8)
-			).into());
+			));
 		}
 
 		if external.key_index_bits == 0 {
-			return Err(ErrorKind::InvalidOptions(
+			bail!(ErrorKind::InvalidOptions(
 				"key_index_bits",
 				"must not be 0.".into()
-			).into());
+			));
 		}
 
 		if external.key_index_bits > 32 {
-			return Err(ErrorKind::InvalidOptions(
+			bail!(ErrorKind::InvalidOptions(
 				"key_index_bits",
 				format!("{} is too large. Only prefixes up to 32 bits are supported.", external.key_index_bits)
-			).into());
+			));
 		}
 
 		let value_size = external.value_len.to_value_size();
