@@ -319,7 +319,7 @@ fn test_quickcheck_exposed_problem() {
         ..Default::default()
     }).unwrap();
 
-    let mut tx = Transaction::default();
+    let mut tx = db.create_transaction();
     tx.insert([0], []);
 
     db.commit(&tx).unwrap();
