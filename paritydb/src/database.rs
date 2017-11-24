@@ -135,9 +135,13 @@ impl Database {
 		})
 	}
 
+	/// Create a new transaction.
+	pub fn create_transaction(&self) -> Transaction {
+		Transaction::new(self.options.external.key_len)
+	}
+
 	/// Commits changes in the transaction.
 	pub fn commit(&mut self, tx: &Transaction) -> Result<()> {
-		// TODO [ToDr] Validate key size
 		self.journal.push(tx)?;
 		Ok(())
 	}
@@ -339,7 +343,6 @@ mod tests {
 	use super::{Database, Options};
 	use options::ValuesLen;
 	use error::ErrorKind;
-	use transaction::Transaction;
 
 	#[test]
 	fn create_insert_and_query() {
@@ -352,9 +355,9 @@ mod tests {
 			..Default::default()
 		}).unwrap();
 
-		let mut tx = Transaction::default();
-		tx.insert("abc", "xyz");
-		tx.insert("cde", "123");
+		let mut tx = db.create_transaction();
+		tx.insert("abc", "xyz").unwrap();
+		tx.insert("cde", "123").unwrap();
 
 		db.commit(&tx).unwrap();
 
@@ -362,9 +365,9 @@ mod tests {
 		assert_eq!(db.get("cde").unwrap().unwrap(), b"123");
 
 		// Another transaction
-		let mut tx = Transaction::default();
-		tx.insert("abc", "456");
-		tx.delete("cde");
+		let mut tx = db.create_transaction();
+		tx.insert("abc", "456").unwrap();
+		tx.delete("cde").unwrap();
 
 		db.commit(&tx).unwrap();
 
@@ -376,6 +379,20 @@ mod tests {
 
 		assert_eq!(db.get("abc").unwrap().unwrap(), b"456");
 		assert_eq!(db.get("cde").unwrap(), None);
+	}
+
+	#[test]
+	fn validate_key_length_at_insert() {
+		let temp = tempdir::TempDir::new("validate_key_length").unwrap();
+
+		let db = Database::create(temp.path(), Options {
+			journal_eras: 0,
+			key_len: 3,
+			..Default::default()
+		}).unwrap();
+
+		let mut tx = db.create_transaction();
+		assert_eq!(*tx.insert("abcdef", "456").unwrap_err().kind(), ErrorKind::InvalidKeyLen(3, 6));
 	}
 
 	#[test]
@@ -401,9 +418,9 @@ mod tests {
 			..Default::default()
 		}).unwrap();
 
-		let mut tx = Transaction::default();
-		tx.insert("abc", "123");
-		tx.delete("abc");
+		let mut tx = db.create_transaction();
+		tx.insert("abc", "123").unwrap();
+		tx.delete("abc").unwrap();
 
 		db.commit(&tx).unwrap();
 		db.flush_journal(1).unwrap();
@@ -422,19 +439,19 @@ mod tests {
 			..Default::default()
 		}).unwrap();
 
-		let mut tx1 = Transaction::default();
-		tx1.insert("abc", "123");
-		tx1.insert("def", "467");
-		tx1.insert("ghi", "zzz");
+		let mut tx1 = db.create_transaction();
+		tx1.insert("abc", "123").unwrap();
+		tx1.insert("def", "467").unwrap();
+		tx1.insert("ghi", "zzz").unwrap();
 
 		db.commit(&tx1).unwrap();
 		db.flush_journal(1).unwrap();
 
-		let mut tx2 = Transaction::default();
-		tx2.insert("jkl", "999");
-		tx2.insert("def", "333");
-		tx2.insert("pqr", "aaa");
-		tx2.delete("ghi");
+		let mut tx2 = db.create_transaction();
+		tx2.insert("jkl", "999").unwrap();
+		tx2.insert("def", "333").unwrap();
+		tx2.insert("pqr", "aaa").unwrap();
+		tx2.delete("ghi").unwrap();
 
 		db.commit(&tx2).unwrap();
 

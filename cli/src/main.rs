@@ -2,7 +2,7 @@ extern crate clap;
 extern crate paritydb;
 
 use clap::{Arg, ArgMatches, App, SubCommand};
-use paritydb::{Database, Error, Options, Transaction};
+use paritydb::{Database, Error, Options};
 
 fn read_parameters<'a>(matches: &'a ArgMatches) -> Result<(&'a str, &'a str, Option<&'a str>), ()>{
 	match (matches.value_of("DB"), matches.value_of("KEY")) {
@@ -35,8 +35,8 @@ fn do_get(db: &str, key: &str) -> Result<(), Error> {
 fn do_insert(db: &str, key: &str, value: &str) -> Result<(), Error> {
 	let mut db = Database::open(db, Options::default())
 				.or(Database::create(db, Options::default()))?;
-	let mut tx = Transaction::default();
-	tx.insert(key, value);
+	let mut tx = db.create_transaction();
+	tx.insert(key, value)?;
 	db.commit(&tx)?;
 	db.flush_journal(1)?;
 	Ok(())
@@ -44,8 +44,8 @@ fn do_insert(db: &str, key: &str, value: &str) -> Result<(), Error> {
 
 fn do_delete(db: &str, key: &str) -> Result<(), Error> {
 	let mut db = Database::open(db, Options::default())?;
-	let mut tx = Transaction::default();
-	tx.delete(key);
+	let mut tx = db.create_transaction();
+	tx.delete(key)?;
 	db.commit(&tx)?;
 	db.flush_journal(1)?;
 	Ok(())

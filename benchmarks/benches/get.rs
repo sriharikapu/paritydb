@@ -20,7 +20,7 @@ fn paritydb_dummy_get(b: &mut Bencher) {
 		value_len: ValuesLen::Constant(3),
 		..Default::default()
 	}).unwrap();
-	let mut tx = Transaction::default();
+	let mut tx = db.create_transaction();
 	tx.insert("abc", "001");
 	db.commit(&tx).unwrap();
 	db.flush_journal(1).unwrap();

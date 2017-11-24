@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use byteorder::{LittleEndian, ByteOrder, WriteBytesExt};
+use error::{ErrorKind, Result};
 
 /// Database operations
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -81,28 +82,46 @@ impl<'a> Operation<'a> {
 
 /// Database operations.
 pub struct Transaction {
+	/// key length, it's used to determine whether an insert
+	/// is valid or not at an early stage, we could probably
+	/// use `Options` or `InternalOptions` here, but right now
+	/// we only care about key size, so it's enough info.
+	key_len: usize,
 	operations: Vec<u8>,
 }
 
-impl Default for Transaction {
-	fn default() -> Self {
+impl Transaction {
+	/// This should only be called in `Database` and some unit tests.
+	/// Use `db.create_transaction()` in any other cases.
+	pub(crate) fn new(key_len: usize) -> Transaction {
 		Transaction {
+			key_len: key_len,
 			operations: Vec::new(),
 		}
 	}
-}
 
-impl Transaction {
 	/// Append new insert operation to the list of transactions.
 	#[inline]
-	pub fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(&mut self, key: K, value: V) {
-		self.push(Operation::Insert(key.as_ref(), value.as_ref()));
+	pub fn insert<K: AsRef<[u8]>, V: AsRef<[u8]>>(&mut self, key: K, value: V) -> Result<()> {
+		let key = key.as_ref();
+		if key.len() != self.key_len {
+			Err(ErrorKind::InvalidKeyLen(self.key_len, key.len()).into())
+		} else {
+			self.push(Operation::Insert(key, value.as_ref()));
+			Ok(())
+		}
 	}
 
 	/// Append new delete operation to the list of transactions.
 	#[inline]
-	pub fn delete<K: AsRef<[u8]>>(&mut self, key: K) {
-		self.push(Operation::Delete(key.as_ref()));
+	pub fn delete<K: AsRef<[u8]>>(&mut self, key: K) -> Result<()> {
+		let key = key.as_ref();
+		if key.len() != self.key_len {
+			Err(ErrorKind::InvalidKeyLen(self.key_len, key.len()).into())
+		} else {
+			self.push(Operation::Delete(key));
+			Ok(())
+		}
 	}
 
 	/// Returns double-ended iterator over all operations in a transaction.
@@ -158,14 +177,26 @@ mod tests {
 
 	#[test]
 	fn test_transaction() {
-		let mut t = Transaction::default();
-		t.insert(b"key", b"value");
-		t.delete(b"key");
+		let mut t = Transaction::new(3);
+		t.insert(b"key", b"value").unwrap();
+		t.delete(b"key").unwrap();
 
 		let mut operations = t.operations();
 
 		assert_eq!(operations.next(), Some(Operation::Insert(b"key", b"value")));
 		assert_eq!(operations.next(), Some(Operation::Delete(b"key")));
 		assert_eq!(operations.next(), None);
+	}
+
+	#[test]
+	fn test_transaction_invalid_key_len_for_insert() {
+		let mut t = Transaction::new(4);
+		assert!(t.insert(b"key", b"value").is_err());
+	}
+
+	#[test]
+	fn test_transaction_invalid_key_len_for_delete() {
+		let mut t = Transaction::new(4);
+		assert!(t.delete(b"key").is_err());
 	}
 }

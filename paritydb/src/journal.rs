@@ -318,15 +318,15 @@ mod tests {
 		let mut path = temp.path().to_path_buf();
 		path.push("file");
 
-		let mut tx = Transaction::default();
-		tx.insert(b"key", b"value");
-		tx.insert(b"key2", b"value");
-		tx.insert(b"key3", b"value");
-		tx.insert(b"key2", b"value2");
-		tx.delete(b"key3");
+		let mut tx = Transaction::new(4);
+		tx.insert(b"key1", b"value").unwrap();
+		tx.insert(b"key2", b"value").unwrap();
+		tx.insert(b"key3", b"value").unwrap();
+		tx.insert(b"key2", b"value2").unwrap();
+		tx.delete(b"key3").unwrap();
 
 		let era = JournalEra::create(path, &tx).unwrap();
-		assert_eq!(JournalOperation::Insert(b"value" as &[u8]), era.get(b"key").unwrap());
+		assert_eq!(JournalOperation::Insert(b"value" as &[u8]), era.get(b"key1").unwrap());
 		assert_eq!(JournalOperation::Insert(b"value2" as &[u8]), era.get(b"key2").unwrap());
 		assert_eq!(JournalOperation::Delete, era.get(b"key3").unwrap());
 		assert_eq!(None, era.get(b"key4"));
@@ -337,9 +337,9 @@ mod tests {
 		let temp = TempDir::new("test_journal_new").unwrap();
 
 		let mut journal = Journal::open(temp.path()).unwrap();
-		journal.push(&Transaction::default()).unwrap();
-		journal.push(&Transaction::default()).unwrap();
-		journal.push(&Transaction::default()).unwrap();
+		journal.push(&Transaction::new(1)).unwrap();
+		journal.push(&Transaction::new(1)).unwrap();
+		journal.push(&Transaction::new(1)).unwrap();
 		assert_eq!(journal.len(), 3);
 
 		journal.drain_front(2);
@@ -353,15 +353,15 @@ mod tests {
 
 		let mut journal = Journal::open(temp.path()).unwrap();
 
-		let mut tx1 = Transaction::default();
-		tx1.insert(b"key", b"value");
-		tx1.insert(b"key2", b"value");
-		tx1.insert(b"key3", b"value");
+		let mut tx1 = Transaction::new(4);
+		tx1.insert(b"key1", b"value").unwrap();
+		tx1.insert(b"key2", b"value").unwrap();
+		tx1.insert(b"key3", b"value").unwrap();
 
-		let mut tx2 = Transaction::default();
-		tx2.insert(b"key2", b"value2");
-		tx2.delete(b"key3");
-		tx2.insert(b"key4", b"value4");
+		let mut tx2 = Transaction::new(4);
+		tx2.insert(b"key2", b"value2").unwrap();
+		tx2.delete(b"key3").unwrap();
+		tx2.insert(b"key4", b"value4").unwrap();
 
 		journal.push(&tx1).unwrap();
 		journal.push(&tx2).unwrap();
@@ -371,7 +371,7 @@ mod tests {
 		assert_eq!(
 			journal.iter().collect::<Vec<_>>(),
 			vec![
-				Operation::Insert(b"key" as &[u8], b"value" as &[u8]),
+				Operation::Insert(b"key1" as &[u8], b"value" as &[u8]),
 				Operation::Insert(b"key2" as &[u8], b"value2" as &[u8]),
 				Operation::Delete(b"key3" as &[u8]),
 				Operation::Insert(b"key4" as &[u8], b"value4" as &[u8])
@@ -385,12 +385,12 @@ mod tests {
 		let mut path = temp.path().to_path_buf();
 		path.push("file");
 
-		let mut tx = Transaction::default();
-		tx.insert(b"key", b"value");
-		tx.insert(b"key2", b"value");
-		tx.insert(b"key3", b"value");
-		tx.insert(b"key2", b"value2");
-		tx.delete(b"key3");
+		let mut tx = Transaction::new(4);
+		tx.insert(b"key1", b"value").unwrap();
+		tx.insert(b"key2", b"value").unwrap();
+		tx.insert(b"key3", b"value").unwrap();
+		tx.insert(b"key2", b"value2").unwrap();
+		tx.delete(b"key3").unwrap();
 		let _ = JournalEra::create(&path, &tx).unwrap();
 
 		// alter hash
@@ -401,7 +401,7 @@ mod tests {
 		// Try to open era
 		assert_eq!(JournalEra::open(&path).unwrap_err().kind(), &ErrorKind::CorruptedJournal(
 			path,
-			"Expected: [56 63 c1 ca 5a 6d 4e d2 b1 e9 70 87 64 79 c2 7c 67 42 44 52 52 37 78 c5 6b 7a 8a 89 e5 de f1 3a], Got: [01 02 03 ca 5a 6d 4e d2 b1 e9 70 87 64 79 c2 7c 67 42 44 52 52 37 78 c5 6b 7a 8a 89 e5 de f1 3a]".into()
+			"Expected: [69 53 c1 6d b6 8a 85 9a b9 d8 b3 da 13 1d ba 6b 2a 17 d9 84 8d bf 6e d4 c0 d6 64 5d b3 98 5d 0c], Got: [01 02 03 6d b6 8a 85 9a b9 d8 b3 da 13 1d ba 6b 2a 17 d9 84 8d bf 6e d4 c0 d6 64 5d b3 98 5d 0c]".into()
 		));
 	}
 }
