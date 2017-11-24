@@ -53,6 +53,30 @@ impl<'a> Operation<'a> {
 			},
 		}
 	}
+
+	fn read_from_buf(buf: &[u8]) -> Option<(Operation, usize)> {
+		if buf.is_empty() {
+			return None;
+		}
+
+		match buf[0] {
+			Operation::INSERT => {
+				let key_len = LittleEndian::read_u32(&buf[1..5]) as usize;
+				let value_len = LittleEndian::read_u32(&buf[5..9]) as usize;
+				let key_end = 9 + key_len;
+				let value_end = key_end + value_len;
+				let o = Operation::Insert(&buf[9..key_end], &buf[key_end..value_end]);
+				Some((o, value_end))
+			},
+			Operation::DELETE => {
+				let key_len = LittleEndian::read_u32(&buf[1..5]) as usize;
+				let key_end = 5 + key_len;
+				let o = Operation::Delete(&buf[5..key_end]);
+				Some((o, key_end))
+			},
+			_ => None,
+		}
+	}
 }
 
 /// Database operations.
@@ -121,25 +145,10 @@ impl<'a> Iterator for OperationsIterator<'a> {
 			return None;
 		}
 
-		match self.data[0] {
-			Operation::INSERT => {
-				let key_len = LittleEndian::read_u32(&self.data[1..5]) as usize;
-				let value_len = LittleEndian::read_u32(&self.data[5..9]) as usize;
-				let key_end = 9 + key_len;
-				let value_end = key_end + value_len;
-				let o = Operation::Insert(&self.data[9..key_end], &self.data[key_end..value_end]);
-				self.data = &self.data[value_end..];
-				Some(o)
-			},
-			Operation::DELETE => {
-				let key_len = LittleEndian::read_u32(&self.data[1..5]) as usize;
-				let key_end = 5 + key_len;
-				let o = Operation::Delete(&self.data[5..key_end]);
-				self.data = &self.data[key_end..];
-				Some(o)
-			},
-			_ => panic!("Unsupported operation!"),
-		}
+		let (operation, consumed_bytes) = Operation::read_from_buf(self.data)
+			.expect("Data is not empty and contains only supported operations; qed");
+		self.data = &self.data[consumed_bytes..];
+		Some(operation)
 	}
 }
 
