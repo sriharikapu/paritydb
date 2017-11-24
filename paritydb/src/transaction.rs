@@ -146,7 +146,7 @@ impl<'a> Iterator for OperationsIterator<'a> {
 		}
 
 		let (operation, consumed_bytes) = Operation::read_from_buf(self.data)
-			.expect("Unsupported operation!");
+			.expect("Data is not empty and contains only supported operations; qed");
 		self.data = &self.data[consumed_bytes..];
 		Some(operation)
 	}
