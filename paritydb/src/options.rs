@@ -95,7 +95,7 @@ impl InternalOptions {
 		if external.key_index_bits == 0 {
 			return Err(ErrorKind::InvalidOptions(
 				"key_index_bits",
-				String::from("must not be 0.")
+				"must not be 0.".into()
 			).into());
 		}
 
