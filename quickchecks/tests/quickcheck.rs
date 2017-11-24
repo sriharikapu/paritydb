@@ -6,7 +6,7 @@ extern crate paritydb;
 extern crate tempdir;
 
 use tempdir::TempDir;
-use paritydb::{Database, ValuesLen, Options, Transaction};
+use paritydb::{Database, ValuesLen, Options};
 use quickcheck::TestResult;
 
 quickcheck! {
@@ -38,7 +38,7 @@ quickcheck! {
             ..Default::default()
         }).unwrap();
 
-        let mut tx = Transaction::default();
+        let mut tx = db.create_transaction();
         tx.insert(key.clone(), value.clone());
 
         db.commit(&tx).unwrap();
