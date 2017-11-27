@@ -476,7 +476,7 @@ mod tests {
 	}
 
 	quickcheck! {
-		fn can_get_inserted_value(key: Vec<u8>, value: Vec<u8>, key_index_bits: u8) -> TestResult {
+		fn quickcheck_can_get_inserted_value(key: Vec<u8>, value: Vec<u8>, key_index_bits: u8) -> TestResult {
 			// else we get something like:
 			// Error(InvalidOptions("key_index_bits", "53 is greater than key length: 24")
 			if key_index_bits as usize > key.len() {
