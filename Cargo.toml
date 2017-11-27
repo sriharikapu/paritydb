@@ -1,2 +1,2 @@
 [workspace]
-members = ["paritydb", "benchmarks", "cli", "quickchecks"]
+members = ["paritydb", "benchmarks", "cli"]
