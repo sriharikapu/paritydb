@@ -18,11 +18,11 @@ impl PrefixTree {
 		leaf as usize + (1 << prefix_bits)
 	}
 
-    #[inline]
-    /// size of the byte slice the function `leaves` will return
-    pub fn leaf_data_len(prefix_bits: u8) -> usize {
-        (1 << prefix_bits) >> 3
-    }
+	#[inline]
+	/// size of the byte slice the function `leaves` will return
+	pub fn leaf_data_len(prefix_bits: u8) -> usize {
+		((1 << prefix_bits) + 7) >> 3
+	}
 
 	/// Creates empty `PrefixTree` for given `prefix_bits`.
 	pub fn new(prefix_bits: u8) -> Self {
