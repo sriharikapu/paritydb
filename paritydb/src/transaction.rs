@@ -174,6 +174,7 @@ impl<'a> Iterator for OperationsIterator<'a> {
 #[cfg(test)]
 mod tests {
 	use super::{Transaction, Operation};
+	use quickcheck::TestResult;
 
 	#[test]
 	fn test_transaction() {
@@ -198,5 +199,46 @@ mod tests {
 	fn test_transaction_invalid_key_len_for_delete() {
 		let mut t = Transaction::new(4);
 		assert!(t.delete(b"key").is_err());
+	}
+
+	quickcheck! {
+		fn quickcheck_insert_operation_roundtrips_to_and_from_buf(key: Vec<u8>, value: Vec<u8>) -> TestResult {
+			let mut buf: Vec<u8> = Vec::new();
+			let op = Operation::Insert(key.as_slice(), value.as_slice());
+			op.write_to_buf(&mut buf);
+			let (op_read, consumed_bytes) = Operation::read_from_buf(&buf).unwrap();
+			TestResult::from_bool(
+				op == op_read && consumed_bytes == 1 + 4 + key.len() + 4 + value.len()
+			)
+		}
+	}
+
+	quickcheck! {
+		fn quickcheck_delete_operation_roundtrips_to_and_from_buf(key: Vec<u8>) -> TestResult {
+			let mut buf: Vec<u8> = Vec::new();
+			let op = Operation::Delete(key.as_slice());
+			op.write_to_buf(&mut buf);
+			let (op_read, consumed_bytes) = Operation::read_from_buf(&buf).unwrap();
+			TestResult::from_bool(
+				op == op_read && consumed_bytes == 1 + 4 + key.len()
+			)
+		}
+	}
+
+	quickcheck! {
+		fn quickcheck_iterate_transaction_operations(key: Vec<u8>, value: Vec<u8>) -> TestResult {
+			let mut tx = Transaction::new(key.len());
+			tx.insert(key.clone(), value.clone());
+			tx.delete(key.clone());
+			tx.insert(key.clone(), value.clone());
+			let ops: Vec<Operation> = tx.operations().collect();
+			TestResult::from_bool(
+				ops == [
+					Operation::Insert(key.as_slice(), value.as_slice()),
+					Operation::Delete(key.as_slice()),
+					Operation::Insert(key.as_slice(), value.as_slice()),
+				]
+			)
+		}
 	}
 }

@@ -60,6 +60,9 @@ extern crate hex_slice;
 extern crate memmap;
 extern crate parking_lot;
 extern crate tiny_keccak;
+#[cfg(test)]
+#[macro_use]
+extern crate quickcheck;
 
 mod database;
 mod error;
