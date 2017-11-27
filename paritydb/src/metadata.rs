@@ -69,8 +69,7 @@ pub mod bytes {
 		/// Panics if the length are not matching.
 		pub fn copy_to_slice(&self, data: &mut [u8]) {
 			let leaves = self.metadata.prefixes.leaves();
-			let leaves_offset = Self::VERSION_SIZE + Self::OCCUPIED_SIZE;
-			data[leaves_offset..].copy_from_slice(leaves);
+			data[leaves_offset()..].copy_from_slice(leaves);
 			LittleEndian::write_u16(data, self.metadata.db_version);
 			LittleEndian::write_u64(&mut data[Self::VERSION_SIZE..], self.metadata.occupied_bytes);
 		}
@@ -81,17 +80,21 @@ pub mod bytes {
 		}
 	}
 
+	#[inline]
+	pub fn leaves_offset() -> usize {
+		Metadata::VERSION_SIZE + Metadata::OCCUPIED_SIZE
+	}
+
 	/// Returns expected `Metadata` bytes len given prefix bits.
 	pub fn len(prefix_bits: u8) -> usize {
-		Metadata::VERSION_SIZE + Metadata::OCCUPIED_SIZE + PrefixTree::leaf_data_len(prefix_bits)
+		leaves_offset() + PrefixTree::leaf_data_len(prefix_bits)
 	}
 
 	/// Read `Metadata` from given slice.
 	pub fn read(data: &[u8], prefix_bits: u8) -> super::Metadata {
 		let db_version = LittleEndian::read_u16(&data[..Metadata::VERSION_SIZE]);
 		let occupied_bytes = LittleEndian::read_u64(&data[Metadata::VERSION_SIZE..]);
-		let leaves_offset = Metadata::VERSION_SIZE + Metadata::OCCUPIED_SIZE;
-		let prefixes = PrefixTree::from_leaves(&data[leaves_offset..], prefix_bits);
+		let prefixes = PrefixTree::from_leaves(&data[leaves_offset()..], prefix_bits);
 
 		assert_eq!(db_version, super::Metadata::DB_VERSION);
 
