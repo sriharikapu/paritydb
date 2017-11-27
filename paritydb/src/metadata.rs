@@ -83,7 +83,7 @@ pub mod bytes {
 
 	/// Returns expected `Metadata` bytes len given prefix bits.
 	pub fn len(prefix_bits: u8) -> usize {
-		Metadata::VERSION_SIZE + Metadata::OCCUPIED_SIZE + ((1 << prefix_bits) >> 3)
+		Metadata::VERSION_SIZE + Metadata::OCCUPIED_SIZE + PrefixTree::leaf_data_len(prefix_bits)
 	}
 
 	/// Read `Metadata` from given slice.

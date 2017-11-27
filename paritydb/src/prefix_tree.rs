@@ -18,6 +18,12 @@ impl PrefixTree {
 		leaf as usize + (1 << prefix_bits)
 	}
 
+    #[inline]
+    /// size of the byte slice the function `leaves` will return
+    pub fn leaf_data_len(prefix_bits: u8) -> usize {
+        (1 << prefix_bits) >> 3
+    }
+
 	/// Creates empty `PrefixTree` for given `prefix_bits`.
 	pub fn new(prefix_bits: u8) -> Self {
 		let size = 2 << prefix_bits;
@@ -32,7 +38,7 @@ impl PrefixTree {
 
 	/// Re-constructs the tree from leaves (a bit vector of occupied prefixes).
 	pub fn from_leaves(data: &[u8], prefix_bits: u8) -> Self {
-		assert_eq!(data.len(), (1 << prefix_bits) >> 3);
+		assert_eq!(data.len(), Self::leaf_data_len(prefix_bits));
 		let mut tree = Self::new(prefix_bits);
 		for (idx, byte) in data.iter().enumerate() {
 			let mut current = 1;
