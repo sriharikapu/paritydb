@@ -307,23 +307,3 @@ fn test_flush_recovery() {
 		AssertEqual("cde", "123"),
 	]);
 }
-
-#[test]
-fn test_quickcheck_exposed_problem() {
-    let temp = TempDir::new("quickcheck_exposed_problem").unwrap();
-    let mut db = Database::create(temp.path(), Options {
-        journal_eras: 0,
-        key_len: 1,
-        key_index_bits: 1,
-        value_len: ValuesLen::Constant(0),
-        ..Default::default()
-    }).unwrap();
-
-    let mut tx = db.create_transaction();
-    tx.insert([0], []);
-
-    db.commit(&tx).unwrap();
-    db.flush_journal(None).unwrap();
-
-    assert_eq!(db.get([0]).unwrap().unwrap(), []);
-}
