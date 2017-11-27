@@ -483,7 +483,7 @@ mod tests {
 				return TestResult::discard();
 			}
 			// else we get something like:
-			// Error(InvalidOptions(\"key_index_bits\", \"0 is too large. Only prefixes up to 32 bits are supported.\")
+			// Error(InvalidOptions("key_index_bits", "must not be 0."))
 			if key_index_bits == 0 {
 				return TestResult::discard();
 			}
