@@ -1,4 +1,41 @@
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+
+use memmap::{Mmap, Protection};
+
+use error::Result;
 use prefix_tree::PrefixTree;
+
+#[derive(Debug)]
+pub struct MetadataFile {
+	pub metadata: Metadata,
+	pub mmap: Mmap,
+}
+
+impl MetadataFile {
+	const META_FILE: &'static str = "meta.db";
+
+	pub fn create<P: AsRef<Path>>(path: P, prefix_bits: u8) -> Result<Self> {
+		let meta_file_path = path.as_ref().join(Self::META_FILE);
+		let mut file = fs::OpenOptions::new()
+			.write(true)
+			.create_new(true)
+			.open(&meta_file_path)?;
+		file.set_len(bytes::len(prefix_bits) as u64)?;
+		file.flush()?;
+
+		Self::open(path, prefix_bits)
+	}
+
+	pub fn open<P: AsRef<Path>>(path: P, prefix_bits: u8) -> Result<Self> {
+		let meta_file_path = path.as_ref().join(Self::META_FILE);
+		let mmap = Mmap::open_path(meta_file_path, Protection::ReadWrite)?;
+		let metadata = bytes::read(unsafe { mmap.as_slice() }, prefix_bits);
+
+		Ok(MetadataFile { metadata, mmap })
+	}
+}
 
 /// A structure holding database metadata information.
 ///
@@ -105,5 +142,3 @@ pub mod bytes {
 		}
 	}
 }
-
-

@@ -11,7 +11,7 @@ use find;
 use flush::Flush;
 use journal::Journal;
 use key::Key;
-use metadata::{self, Metadata};
+use metadata::MetadataFile;
 use options::{Options, InternalOptions};
 use record::Record;
 use transaction::{Operation, Transaction};
@@ -64,14 +64,12 @@ pub struct Database {
 	path: PathBuf,
 	options: InternalOptions,
 	journal: Journal,
-	metadata: Metadata,
-	metadata_mmap: Mmap,
+	metadata_file: MetadataFile,
 	mmap: Mmap,
 }
 
 impl Database {
 	const DB_FILE: &'static str = "data.db";
-	const META_FILE: &'static str = "meta.db";
 
 	/// Creates new database at given location.
 	pub fn create<P: AsRef<Path>>(path: P, options: Options) -> Result<Self> {
@@ -92,15 +90,7 @@ impl Database {
 		}
 
 		// Create Metadata file.
-		{
-			let meta_file_path = path.as_ref().join(Self::META_FILE);
-			let mut file = fs::OpenOptions::new()
-				.write(true)
-				.create_new(true)
-				.open(&meta_file_path)?;
-			file.set_len(metadata::bytes::len(options.external.key_index_bits) as u64)?;
-			file.flush()?;
-		}
+		MetadataFile::create(&path, options.external.key_index_bits)?;
 
 		Self::open(path, options.external)
 	}
@@ -113,15 +103,12 @@ impl Database {
 		let db_file_path = path.as_ref().join(Self::DB_FILE);
 		let mut mmap = Mmap::open_path(db_file_path, Protection::ReadWrite)?;
 
-		let meta_file_path = path.as_ref().join(Self::META_FILE);
-		let mut metadata_mmap = Mmap::open_path(meta_file_path, Protection::ReadWrite)?;
-
-		let mut metadata = metadata::bytes::read(unsafe { metadata_mmap.as_slice() }, options.external.key_index_bits);
+		let mut metadata_file = MetadataFile::open(&path, options.external.key_index_bits)?;
 
 		if let Some(flush) = Flush::open(path.as_ref(), options.external.key_index_bits)? {
-			flush.flush(unsafe { mmap.as_mut_slice() }, unsafe { metadata_mmap.as_mut_slice() }, &mut metadata);
+			flush.flush(unsafe { mmap.as_mut_slice() }, unsafe { metadata_file.mmap.as_mut_slice() }, &mut metadata_file.metadata);
 			mmap.flush()?;
-			metadata_mmap.flush()?;
+			metadata_file.mmap.flush()?;
 			flush.delete()?;
 		}
 
@@ -129,8 +116,7 @@ impl Database {
 			path: path.as_ref().to_owned(),
 			options,
 			journal,
-			metadata,
-			metadata_mmap,
+			metadata_file,
 			mmap,
 		})
 	}
@@ -162,16 +148,16 @@ impl Database {
 				&self.path,
 				&self.options,
 				unsafe { self.mmap.as_slice() },
-				&self.metadata,
+				&self.metadata_file.metadata,
 				era.iter(),
 			)?;
 			era.delete()?;
 			// TODO: metadata should be a single structure
 			// updating self.metadata should happen after all calls
 			// which may fail ("?")
-			flush.flush(unsafe { self.mmap.as_mut_slice() }, unsafe { self.metadata_mmap.as_mut_slice() }, &mut self.metadata);
+			flush.flush(unsafe { self.mmap.as_mut_slice() }, unsafe { self.metadata_file.mmap.as_mut_slice() }, &mut self.metadata_file.metadata);
 			self.mmap.flush()?;
-			self.metadata_mmap.flush()?;
+			self.metadata_file.mmap.flush()?;
 			flush.delete()?;
 		}
 
@@ -193,7 +179,7 @@ impl Database {
 		let value_size = self.options.value_size;
 
 		let key = Key::new(key, self.options.external.key_index_bits);
-		if !self.metadata.prefixes.has(key.prefix).unwrap_or(false) {
+		if !self.metadata_file.metadata.prefixes.has(key.prefix).unwrap_or(false) {
 			return Ok(None);
 		}
 
@@ -210,7 +196,7 @@ impl Database {
 	/// Returns an iterator over the database key-value pairs.
 	pub fn iter(&self) -> Result<DatabaseIterator> {
 		let data = unsafe { &self.mmap.as_slice() };
-		let occupied_offset_iter = self.metadata.prefixes.offset_iter();
+		let occupied_offset_iter = self.metadata_file.metadata.prefixes.offset_iter();
 		let field_body_size = self.options.field_body_size;
 		let key_size = self.options.external.key_len;
 		let value_size = self.options.value_size;
