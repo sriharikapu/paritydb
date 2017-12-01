@@ -83,3 +83,5 @@ pub use error::{Error, Result, ErrorKind};
 pub use options::{Options, ValuesLen};
 pub use record::Record;
 pub use transaction::Transaction;
+#[doc(hidden)]
+pub use prefix_tree::PrefixTree;

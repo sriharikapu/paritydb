@@ -18,3 +18,25 @@ matrix:
 script:
   - cargo build --all --exclude benchmarks
   - cargo test --all --exclude benchmarks
+
+  # benchmark comparison inspired by:
+  # https://beachape.com/blog/2016/11/02/rust-performance-testing-on-travis-ci/
+
+  # only run benches on PRs and when testing "nightly"
+  - if [ "${TRAVIS_PULL_REQUEST_BRANCH:-$TRAVIS_BRANCH}" == "master" ] || [ "$TRAVIS_RUST_VERSION" != "nightly" ]; then
+      exit 0;
+    fi
+
+  # bench our branch
+  - cargo bench > benches-variable
+  - cat benches-variable
+
+  # bench master
+  - git checkout master
+  - cargo bench > benches-control
+  - cat benches-control
+
+  # compare benchmarks (--force to prevent error if it already exists because it was cached)
+  - cargo install cargo-benchcmp --force
+  # allow 3% difference
+  - cargo benchcmp benches-control benches-variable --threshold 3
