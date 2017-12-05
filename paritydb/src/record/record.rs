@@ -1,5 +1,3 @@
-use std::cmp::Ordering;
-
 use byteorder::{LittleEndian, ByteOrder};
 
 use field::view::FieldsView;
@@ -19,7 +17,7 @@ pub enum ValueSize {
 /// A view onto database record.
 #[derive(Debug, PartialEq)]
 pub struct Record<'a> {
-	key: FieldsView<'a>,
+	key: &'a [u8],
 	value: FieldsView<'a>,
 	len: usize,
 }
@@ -31,6 +29,8 @@ impl<'a> Record<'a> {
 
 		let view = FieldsView::new(data, field_body_size);
 		let (key, rest) = view.split_at(key_size);
+		let key = key.raw_slice().expect("only returns None when addressed value isn't stored in a single field; \
+										  keys are always stored in a single field; qed");
 
 		match value_size {
 			ValueSize::Constant(value_size) => {
@@ -59,21 +59,9 @@ impl<'a> Record<'a> {
 		LittleEndian::read_u32(&data)
 	}
 
-	/// Returns true of record key is equal to given slice.
-	// TODO [ToDr] IMHO it would be better to get rid of those methods and expose key and value directly:
-	// record.key() == <sth>
-	pub fn key_is_equal(&self, slice: &[u8]) -> bool {
-		self.key == slice
-	}
-
-	/// Returns true of record key is strictly greater than given slice.
-	pub fn key_is_greater(&self, slice: &[u8]) -> bool {
-		self.key > slice
-	}
-
-	/// Returns an ordering between self and the given slice if both have the same length.
-	pub fn key_cmp(&self, slice: &[u8]) -> Option<Ordering> {
-		self.key.partial_cmp(&slice)
+	/// Returns record's key.
+	pub fn key(&self) -> &'a [u8] {
+		self.key
 	}
 
 	/// Returns true of record value is equal to given slice.
@@ -81,23 +69,10 @@ impl<'a> Record<'a> {
 		self.value == slice
 	}
 
-	/// Returns underlying key.
-	pub fn key_raw_slice(&self) -> &'a [u8] {
-		self.key.raw_slice()
-			.expect("only returns None when addressed value isn't stored in a single field; \
-					 keys are always stored in a single field; qed")
-	}
-
 	/// Returns underlying value if it is a continuous slice of memory,
 	/// otherwise returns None.
 	pub fn value_raw_slice(&self) -> Option<&'a [u8]> {
 		self.value.raw_slice()
-	}
-
-	/// Reads record key to given slice.
-	/// Panics if the size does not match.
-	pub fn read_key(&self, slice: &mut [u8]) {
-		self.key.copy_to_slice(slice);
 	}
 
 	/// Reads value to given slice.
