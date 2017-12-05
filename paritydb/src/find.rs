@@ -2,7 +2,7 @@ use std::cmp;
 
 use field::iterator::FieldHeaderIterator;
 use field::{Error, Header, field_size};
-use prefix_tree::OccupiedOffsetIterator;
+use prefix_tree::OccupiedPrefixesIterator;
 use record::{ValueSize, Record};
 
 /// Record location.
@@ -50,7 +50,7 @@ pub fn find_record<'a>(
 
 pub fn iter<'a>(
 	data: &'a [u8],
-	occupied_offset_iter: OccupiedOffsetIterator<'a>,
+	occupied_offset_iter: OccupiedPrefixesIterator<'a>,
 	field_body_size: usize,
 	key_size: usize,
 	value_size: ValueSize
@@ -62,7 +62,7 @@ pub fn iter<'a>(
 	Ok(RecordIterator { data, occupied_offset_iter, offset, peek_offset, field_body_size, field_size, key_size, value_size })
 }
 
-pub struct RecordIterator<'a, T = OccupiedOffsetIterator<'a>> {
+pub struct RecordIterator<'a, T = OccupiedPrefixesIterator<'a>> {
 	data: &'a [u8],
 	occupied_offset_iter: T,
 	offset: u32,

@@ -98,8 +98,8 @@ impl PrefixTree {
 	}
 
 	/// Returns an iterator of occupied prefixes.
-	pub fn offset_iter(&self) -> OccupiedOffsetIterator {
-		OccupiedOffsetIterator {
+	pub fn prefixes_iter(&self) -> OccupiedPrefixesIterator {
+		OccupiedPrefixesIterator {
 			tree: &self.tree,
 			idx: 0,
 			first_leaf_idx: Self::leaf_index(0, self.prefix_bits),
@@ -114,13 +114,13 @@ impl PrefixTree {
 
 /// An occupied prefixes iterator.
 /// Quickly traverses the tree and returns only prefixes that are occupied.
-pub struct OccupiedOffsetIterator<'a> {
+pub struct OccupiedPrefixesIterator<'a> {
 	tree: &'a BitVec<u8>,
 	idx: usize,
 	first_leaf_idx: usize,
 }
 
-impl<'a> OccupiedOffsetIterator<'a> {
+impl<'a> OccupiedPrefixesIterator<'a> {
 	fn next_idx(&self, mut idx: usize) -> Option<usize> {
 		let mut go_back = false;
 		if idx % 2 == 1 {
@@ -166,7 +166,7 @@ impl<'a> OccupiedOffsetIterator<'a> {
 	}
 }
 
-impl<'a> Iterator for OccupiedOffsetIterator<'a> {
+impl<'a> Iterator for OccupiedPrefixesIterator<'a> {
 	type Item = u32;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -241,12 +241,12 @@ mod tests {
 	}
 
 	#[test]
-	fn test_offset_iterator() {
+	fn test_prefixes_iterator() {
 		let prefix_bits = 4;
 		let data = [0b01010101, 0b00000001];
 		let tree = PrefixTree::from_leaves(&data, prefix_bits);
 
-		let mut it = tree.offset_iter();
+		let mut it = tree.prefixes_iter();
 
 		assert_eq!(it.next(), Some(0));
 		assert_eq!(it.next(), Some(2));
@@ -257,7 +257,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_offset_iterator2() {
+	fn test_prefixes_iterator2() {
 		let prefix_bits = 5;
 		let mut tree = PrefixTree::new(prefix_bits);
 		tree.insert(0);
@@ -268,7 +268,7 @@ mod tests {
 		tree.insert(24);
 		tree.insert(31);
 
-		let mut it = tree.offset_iter();
+		let mut it = tree.prefixes_iter();
 
 		assert_eq!(it.next(), Some(0));
 		assert_eq!(it.next(), Some(6));

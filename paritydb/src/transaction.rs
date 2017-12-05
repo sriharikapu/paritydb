@@ -228,9 +228,9 @@ mod tests {
 	quickcheck! {
 		fn quickcheck_iterate_transaction_operations(key: Vec<u8>, value: Vec<u8>) -> TestResult {
 			let mut tx = Transaction::new(key.len());
-			tx.insert(key.clone(), value.clone());
-			tx.delete(key.clone());
-			tx.insert(key.clone(), value.clone());
+			tx.insert(key.clone(), value.clone()).unwrap();
+			tx.delete(key.clone()).unwrap();
+			tx.insert(key.clone(), value.clone()).unwrap();
 			let ops: Vec<Operation> = tx.operations().collect();
 			TestResult::from_bool(
 				ops == [

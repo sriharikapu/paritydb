@@ -161,11 +161,9 @@ impl<'a> FieldsView<'a> {
 		}
 	}
 
-	#[inline]
-	pub fn len(&self) -> usize {
-		self.len
-	}
-
+	/// Copy field content to given slice.
+	///
+	/// Panics if the lengths don't match.
 	pub fn copy_to_slice(&self, slice: &mut [u8]) {
 		assert_eq!(self.len, slice.len(), "slice must have the same size");
 
@@ -178,6 +176,10 @@ impl<'a> FieldsView<'a> {
 		on_body_slice!(self, slice, copy_to_slice);
 	}
 
+	/// Split this field view into two at given position.
+	///
+	/// The first returned `FieldView` will contain elements from `[0, pos)`
+	/// and the second `[pos, len)``
 	pub fn split_at(self, pos: usize) -> (Self, Self) {
 		assert!(self.len >= pos, "Cannot split beyond length: {} < {} ", self.len, pos);
 		assert!(self.data.len() >= self.offset + pos, "Cannot split beyond data length: {} < {}", self.data.len(), self.offset + pos);

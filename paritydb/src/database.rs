@@ -234,7 +234,7 @@ impl Database {
 	/// Returns an iterator over the database key-value pairs.
 	pub fn iter(&self) -> Result<DatabaseIterator> {
 		let data = unsafe { &self.mmap.as_slice() };
-		let occupied_offset_iter = self.metadata.prefixes.offset_iter();
+		let occupied_offset_iter = self.metadata.prefixes.prefixes_iter();
 		let field_body_size = self.options.field_body_size;
 		let key_size = self.options.external.key_len;
 		let value_size = self.options.value_size;
@@ -510,17 +510,24 @@ mod tests {
 		let temp = tempdir::TempDir::new("exclusive_access").unwrap();
 
 		{
-			let mut db = Database::create(temp.path(), Default::default());
+
+			// Acquire lock
+			let _db = Database::create(temp.path(), Default::default());
+			// attempt to open again
 			assert!(matches!(
 				Database::open(temp.path(), Default::default()).unwrap_err().kind(),
-				&ErrorKind::DatabaseLocked(_)));
+				&ErrorKind::DatabaseLocked(_)
+			));
 		}
 
 		{
-			let mut db = Database::open(temp.path(), Default::default());
+			// Acquire lock
+			let _db = Database::open(temp.path(), Default::default());
+			// attempt to create
 			assert!(matches!(
 				Database::create(temp.path(), Default::default()).unwrap_err().kind(),
-				&ErrorKind::DatabaseLocked(_)));
+				&ErrorKind::DatabaseLocked(_)
+			));
 		}
 
 		assert!(Database::open(temp.path(), Default::default()).is_ok());
@@ -556,7 +563,7 @@ mod tests {
 			}).unwrap();
 
 			let mut tx = db.create_transaction();
-			tx.insert(key.clone(), value.clone());
+			tx.insert(key.clone(), value.clone()).unwrap();
 
 			db.commit(&tx).unwrap();
 			db.flush_journal(None).unwrap();
