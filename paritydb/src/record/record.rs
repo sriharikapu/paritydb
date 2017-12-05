@@ -114,22 +114,20 @@ mod tests {
 			1, 0xfa, 0xfb, 0xfc, 1, 2, 3, 4, 5,
 			1, 0xfd, 0xfe, 0xff, 6, 7, 8, 9, 10,
 		];
-		let mut key = [0; 3];
-		let mut value = [0; 5];
-
 
 		let record = Record::new(&data, body_size, value_size, key_size);
-		record.read_key(&mut key);
+		let key = record.key();
 		assert_eq!(key, [0xfa, 0xfb, 0xfc]);
-		assert!(record.key_is_equal(&key));
+
+		let mut value = [0; 5];
 		assert_eq!(record.value_len(), 5);
 		record.read_value(&mut value);
 		assert_eq!(value, [1, 2, 3, 4, 5]);
 
 		let record = Record::new(&data[body_size + field::HEADER_SIZE..], body_size, value_size, key_size);
-		record.read_key(&mut key);
+		let key = record.key();
 		assert_eq!(key, [0xfd, 0xfe, 0xff]);
-		assert!(record.key_is_equal(&key));
+
 		assert_eq!(record.value_len(), 5);
 		record.read_value(&mut value);
 		assert_eq!(value, [6, 7, 8, 9, 10]);
@@ -144,22 +142,21 @@ mod tests {
 			1, 0xfa, 0xfb, 3, 0, 0, 0, 1, 2, 3, 99,
 			1, 0xfc, 0xfd, 1, 0, 0, 0, 4, 0, 0, 0,
 		];
-		let mut key = [0; 2];
 		let mut value1 = [0; 3];
 		let mut value2 = [0; 1];
 
 		let record1 = Record::new(&data, body_size, value_size, key_size);
-		record1.read_key(&mut key);
-		assert_eq!(key, [0xfa, 0xfb]);
-		assert!(record1.key_is_equal(&key));
+		let key1 = record1.key();
+		assert_eq!(key1, [0xfa, 0xfb]);
+
 		assert_eq!(record1.value_len(), 3);
 		record1.read_value(&mut value1);
 		assert_eq!(value1, [1, 2, 3]);
 
 		let record2 = Record::new(&data[body_size + field::HEADER_SIZE..], body_size, value_size, key_size);
-		record2.read_key(&mut key);
-		assert_eq!(key, [0xfc, 0xfd]);
-		assert!(record2.key_is_equal(&key));
+		let key2 = record2.key();
+		assert_eq!(key2, [0xfc, 0xfd]);
+
 		assert_eq!(record2.value_len(), 1);
 		record2.read_value(&mut value2);
 		assert_eq!(value2, [4]);
