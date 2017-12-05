@@ -7,48 +7,6 @@ use memmap::{Mmap, Protection};
 use error::Result;
 use prefix_tree::PrefixTree;
 
-#[derive(Debug)]
-pub struct MetadataFile {
-	pub metadata: Metadata,
-	pub mmap: Mmap,
-}
-
-impl MetadataFile {
-	const META_FILE: &'static str = "meta.db";
-
-	pub fn create<P: AsRef<Path>>(path: P, prefix_bits: u8) -> Result<Self> {
-		let meta_file_path = path.as_ref().join(Self::META_FILE);
-		let mut file = fs::OpenOptions::new()
-			.write(true)
-			.create_new(true)
-			.open(&meta_file_path)?;
-		file.set_len(bytes::len(prefix_bits) as u64)?;
-		file.flush()?;
-
-		Self::open(path, prefix_bits)
-	}
-
-	pub fn open<P: AsRef<Path>>(path: P, prefix_bits: u8) -> Result<Self> {
-		let meta_file_path = path.as_ref().join(Self::META_FILE);
-		let mmap = Mmap::open_path(meta_file_path, Protection::ReadWrite)?;
-		let metadata = bytes::read(unsafe { mmap.as_slice() }, prefix_bits);
-
-		Ok(MetadataFile { metadata, mmap })
-	}
-
-	pub fn update(&mut self, raw_metadata: &[u8], metadata: Metadata) -> Result<()> {
-		{
-			let meta = unsafe { self.mmap.as_mut_slice() };
-			meta.copy_from_slice(raw_metadata);
-		}
-
-		self.mmap.flush()?;
-		self.metadata = metadata;
-
-		Ok(())
-	}
-}
-
 /// A structure holding database metadata information.
 ///
 /// Currently we store a prefix tree for fast lookups and iterations
@@ -91,6 +49,52 @@ impl Metadata {
 	/// Returns bytes representation of `Metadata`.
 	pub fn as_bytes(&self) -> bytes::Metadata {
 		bytes::Metadata::new(self)
+	}
+}
+
+/// Stores the metadata structure and the mmap that is backing it.
+#[derive(Debug)]
+pub struct MetadataFile {
+	pub metadata: Metadata,
+	pub mmap: Mmap,
+}
+
+impl MetadataFile {
+	const META_FILE: &'static str = "meta.db";
+
+	/// Create a new metadata file at given location.
+	pub fn create<P: AsRef<Path>>(path: P, prefix_bits: u8) -> Result<Self> {
+		let meta_file_path = path.as_ref().join(Self::META_FILE);
+		let mut file = fs::OpenOptions::new()
+			.write(true)
+			.create_new(true)
+			.open(&meta_file_path)?;
+		file.set_len(bytes::len(prefix_bits) as u64)?;
+		file.flush()?;
+
+		Self::open(path, prefix_bits)
+	}
+
+	/// Open an existing metadata file at given location.
+	pub fn open<P: AsRef<Path>>(path: P, prefix_bits: u8) -> Result<Self> {
+		let meta_file_path = path.as_ref().join(Self::META_FILE);
+		let mmap = Mmap::open_path(meta_file_path, Protection::ReadWrite)?;
+		let metadata = bytes::read(unsafe { mmap.as_slice() }, prefix_bits);
+
+		Ok(MetadataFile { metadata, mmap })
+	}
+
+	/// Update the metadata and the mmap backing it.
+	pub fn update(&mut self, raw_metadata: &[u8], metadata: Metadata) -> Result<()> {
+		{
+			let meta = unsafe { self.mmap.as_mut_slice() };
+			meta.copy_from_slice(raw_metadata);
+		}
+
+		self.mmap.flush()?;
+		self.metadata = metadata;
+
+		Ok(())
 	}
 }
 
