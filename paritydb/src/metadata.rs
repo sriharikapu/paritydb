@@ -35,6 +35,18 @@ impl MetadataFile {
 
 		Ok(MetadataFile { metadata, mmap })
 	}
+
+	pub fn update(&mut self, raw_metadata: &[u8], metadata: Metadata) -> Result<()> {
+		{
+			let meta = unsafe { self.mmap.as_mut_slice() };
+			meta.copy_from_slice(raw_metadata);
+		}
+
+		self.mmap.flush()?;
+		self.metadata = metadata;
+
+		Ok(())
+	}
 }
 
 /// A structure holding database metadata information.

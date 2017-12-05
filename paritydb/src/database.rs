@@ -106,9 +106,12 @@ impl Database {
 		let mut metadata_file = MetadataFile::open(&path, options.external.key_index_bits)?;
 
 		if let Some(flush) = Flush::open(path.as_ref(), options.external.key_index_bits)? {
-			flush.flush(unsafe { mmap.as_mut_slice() }, unsafe { metadata_file.mmap.as_mut_slice() }, &mut metadata_file.metadata);
-			mmap.flush()?;
-			metadata_file.mmap.flush()?;
+			{
+				let (raw_metadata, metadata) = flush.flush(unsafe { mmap.as_mut_slice() });
+				mmap.flush()?;
+				metadata_file.update(raw_metadata, metadata)?;
+			}
+
 			flush.delete()?;
 		}
 
@@ -152,12 +155,13 @@ impl Database {
 				era.iter(),
 			)?;
 			era.delete()?;
-			// TODO: metadata should be a single structure
-			// updating self.metadata should happen after all calls
-			// which may fail ("?")
-			flush.flush(unsafe { self.mmap.as_mut_slice() }, unsafe { self.metadata_file.mmap.as_mut_slice() }, &mut self.metadata_file.metadata);
-			self.mmap.flush()?;
-			self.metadata_file.mmap.flush()?;
+
+			{
+				let (raw_metadata, metadata) = flush.flush(unsafe { self.mmap.as_mut_slice() });
+				self.mmap.flush()?;
+				self.metadata_file.update(raw_metadata, metadata)?;
+			}
+
 			flush.delete()?;
 		}
 

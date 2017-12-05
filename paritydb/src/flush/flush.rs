@@ -1,6 +1,6 @@
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::{mem, fs};
 
 use hex_slice::AsHex;
 use memmap::{Mmap, Protection};
@@ -105,8 +105,8 @@ impl Flush {
 		}))
 	}
 
-	/// Flushes idempotent operations to the database.
-	pub fn flush(&self, db: &mut [u8], raw_metadata: &mut [u8], metadata: &mut Metadata) {
+	/// Flushes idempotent operations to the database. Returns the updated metadata.
+	pub fn flush(&self, db: &mut [u8]) -> (&[u8], Metadata) {
 		let meta_offset = self.mmap.len() - metadata::bytes::len(self.prefix_bits);
 		let operations = unsafe { &self.mmap.as_slice()[Self::CHECKSUM_SIZE..meta_offset] };
 		let operations = IdempotentOperationIterator::new(operations);
@@ -115,9 +115,9 @@ impl Flush {
 			db[o.offset..o.offset + o.data.len()].copy_from_slice(o.data);
 		}
 
-		let meta = unsafe { &self.mmap.as_slice()[meta_offset..] };
-		raw_metadata.copy_from_slice(meta);
-		mem::swap(&mut self.metadata.clone(), metadata);
+		let raw_meta = unsafe { &self.mmap.as_slice()[meta_offset..] };
+
+		(raw_meta, self.metadata.clone())
 	}
 
 	/// Delete flush file. Should be called only after database has been successfully flushed.
