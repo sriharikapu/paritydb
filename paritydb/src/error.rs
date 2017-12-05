@@ -41,6 +41,12 @@ error_chain! {
 			description("Invalid options were provided"),
 			display("Invalid value of `{}`: {}", field, error),
 		}
+		DatabaseLocked(path: PathBuf) {
+			description("Database file lock is currently acquired"),
+			display("Could not acquire database file lock: {}. \
+					 If you're sure that no other process is using \
+					 the database you can delete this file.", path.display()),
+		}
 	}
 }
 

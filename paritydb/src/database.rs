@@ -3,7 +3,9 @@ use std::collections::btree_set;
 use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::{cmp, fs};
+use std::fs::File;
 
+use fs2::FileExt;
 use memmap::{Mmap, Protection};
 
 use error::{ErrorKind, Result};
@@ -67,11 +69,24 @@ pub struct Database {
 	metadata: Metadata,
 	metadata_mmap: Mmap,
 	mmap: Mmap,
+	lock_file: File,
 }
 
 impl Database {
 	const DB_FILE: &'static str = "data.db";
 	const META_FILE: &'static str = "meta.db";
+	const LOCK_FILE: &'static str = "LOCK";
+
+	fn acquire_lock_file<P: AsRef<Path>>(path: P) -> Result<File> {
+		let lock_file_path = path.as_ref().join(Self::LOCK_FILE);
+		let lock_file = fs::OpenOptions::new()
+			.write(true)
+			.create(true)
+			.open(&lock_file_path)?;
+		lock_file.try_lock_exclusive().map_err(|_| ErrorKind::DatabaseLocked(lock_file_path))?;
+
+		Ok(lock_file)
+	}
 
 	/// Creates new database at given location.
 	pub fn create<P: AsRef<Path>>(path: P, options: Options) -> Result<Self> {
@@ -79,6 +94,9 @@ impl Database {
 
 		// Create directories if necessary.
 		fs::create_dir_all(&path)?;
+
+		// Create/Acquire Lock file.
+		let lock_file = Self::acquire_lock_file(&path)?;
 
 		// Create DB file.
 		{
@@ -102,11 +120,16 @@ impl Database {
 			file.flush()?;
 		}
 
-		Self::open(path, options.external)
+		Self::open_internal(path, lock_file, options.external)
 	}
 
 	/// Opens an existing DB at given location.
 	pub fn open<P: AsRef<Path>>(path: P, options: Options) -> Result<Self> {
+		let lock_file = Self::acquire_lock_file(&path)?;
+		Self::open_internal(path, lock_file, options)
+	}
+
+	fn open_internal<P: AsRef<Path>>(path: P, lock_file: File, options: Options) -> Result<Self> {
 		let options = InternalOptions::from_external(options)?;
 		let journal = Journal::open(&path)?;
 
@@ -132,6 +155,7 @@ impl Database {
 			metadata,
 			metadata_mmap,
 			mmap,
+			lock_file,
 		})
 	}
 
@@ -220,6 +244,12 @@ impl Database {
 		let pending = IteratorValue::None;
 
 		Ok(DatabaseIterator { record_iter, journal_iter, pending })
+	}
+}
+
+impl Drop for Database {
+	fn drop(&mut self) {
+		let _ = self.lock_file.unlock();
 	}
 }
 
@@ -473,6 +503,27 @@ mod tests {
 			records.collect::<Vec<_>>(),
 			expected.iter().map(|x| (x.0.to_string(), x.1.to_string())).collect::<Vec<_>>()
 		);
+	}
+
+	#[test]
+	fn should_validate_exclusive_access() {
+		let temp = tempdir::TempDir::new("exclusive_access").unwrap();
+
+		{
+			let mut db = Database::create(temp.path(), Default::default());
+			assert!(matches!(
+				Database::open(temp.path(), Default::default()).unwrap_err().kind(),
+				&ErrorKind::DatabaseLocked(_)));
+		}
+
+		{
+			let mut db = Database::open(temp.path(), Default::default());
+			assert!(matches!(
+				Database::create(temp.path(), Default::default()).unwrap_err().kind(),
+				&ErrorKind::DatabaseLocked(_)));
+		}
+
+		assert!(Database::open(temp.path(), Default::default()).is_ok());
 	}
 
 	quickcheck! {

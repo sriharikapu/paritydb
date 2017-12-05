@@ -56,10 +56,14 @@ extern crate bit_vec;
 extern crate byteorder;
 #[macro_use]
 extern crate error_chain;
+extern crate fs2;
 extern crate hex_slice;
 extern crate memmap;
 extern crate parking_lot;
 extern crate tiny_keccak;
+#[cfg(test)]
+#[macro_use]
+extern crate matches;
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck;
