@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
-use std::collections::btree_set;
+use std::collections::{btree_set, BTreeMap, BTreeSet};
+use std::collections::btree_map::Entry;
 use std::io::Write;
 use std::path::{PathBuf, Path};
 use std::{cmp, fs};
@@ -244,6 +245,37 @@ impl Database {
 		let pending = IteratorValue::None;
 
 		Ok(DatabaseIterator { record_iter, journal_iter, pending })
+	}
+
+	fn collisions(&self) -> Result<BTreeMap<u32, BTreeSet<Vec<u8>>>> {
+		const MAX_COLLISIONS: usize = 3;
+
+		// FIXME: this is currently copying keys
+		let mut collisions: BTreeMap<u32, BTreeSet<Vec<u8>>> = BTreeMap::new();
+
+		// iterate through the database to find the load factor of each prefix
+		// TODO: this should only iterate through the journal & data file (shouldn't search collision files)
+		for r in self.iter()? {
+			let (key, _) = r?;
+
+			let prefix = Key::new(key, self.options.external.key_index_bits).prefix;
+			match collisions.entry(prefix) {
+				Entry::Vacant(entry) => {
+					let mut set = BTreeSet::new();
+					set.insert(key.to_vec());
+					entry.insert(set);
+				},
+				Entry::Occupied(mut entry) => {
+					entry.get_mut().insert(key.to_vec());
+				},
+			}
+		}
+
+		// drop prefixes that have a number of collisions lower than the allowed threshold
+		let collisions: BTreeMap<u32, BTreeSet<Vec<u8>>> =
+			collisions.into_iter().filter(|p| p.1.len() >= MAX_COLLISIONS).collect();
+
+		Ok(collisions)
 	}
 }
 
