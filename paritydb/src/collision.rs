@@ -6,6 +6,12 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use error::Result;
 
+/// A data file representing all the data for a given prefix.  All the data for
+/// this prefix exists in this file because there was a high threshold of
+/// collisions.
+///
+/// Idea: use exactly the same strategy as used for the data file but ignoring
+/// the first `n` bits of the prefix and adding extra bits as needed
 pub struct Collision {
 	prefix: u32,
 	file: File,

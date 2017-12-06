@@ -9,6 +9,7 @@ use std::fs::File;
 use fs2::FileExt;
 use memmap::{Mmap, Protection};
 
+use collision::Collision;
 use error::{ErrorKind, Result};
 use find;
 use flush::Flush;
@@ -247,35 +248,71 @@ impl Database {
 		Ok(DatabaseIterator { record_iter, journal_iter, pending })
 	}
 
-	fn collisions(&self) -> Result<BTreeMap<u32, BTreeSet<Vec<u8>>>> {
+	fn collisions(&self) -> Result<BTreeMap<u32, Vec<Vec<u8>>>> {
 		const MAX_COLLISIONS: usize = 3;
 
 		// FIXME: this is currently copying keys
-		let mut collisions: BTreeMap<u32, BTreeSet<Vec<u8>>> = BTreeMap::new();
+		let mut collisions: BTreeMap<u32, Vec<Vec<u8>>> = BTreeMap::new();
 
 		// iterate through the database to find the load factor of each prefix
-		// TODO: this should only iterate through the journal & data file (shouldn't search collision files)
+		// NOTE: this should only iterate through the journal and data file (shouldn't search collision files)
 		for r in self.iter()? {
 			let (key, _) = r?;
 
 			let prefix = Key::new(key, self.options.external.key_index_bits).prefix;
 			match collisions.entry(prefix) {
 				Entry::Vacant(entry) => {
-					let mut set = BTreeSet::new();
-					set.insert(key.to_vec());
-					entry.insert(set);
+					entry.insert(vec![key.to_vec()]);
 				},
 				Entry::Occupied(mut entry) => {
-					entry.get_mut().insert(key.to_vec());
+					entry.get_mut().push(key.to_vec());
 				},
 			}
 		}
 
 		// drop prefixes that have a number of collisions lower than the allowed threshold
-		let collisions: BTreeMap<u32, BTreeSet<Vec<u8>>> =
+		let collisions: BTreeMap<u32, Vec<Vec<u8>>> =
 			collisions.into_iter().filter(|p| p.1.len() >= MAX_COLLISIONS).collect();
 
 		Ok(collisions)
+	}
+
+	/// Finds prefixes that have a number of collisions higher than the configured threshold and
+	/// moves them to a separate file.
+	pub fn compact(&mut self) -> Result<()> {
+		let collisions = self.collisions()?;
+
+		for (prefix, keys) in collisions.iter() {
+			let mut collision_file = Collision::create(&self.path, *prefix)?;
+
+			for key in keys {
+				// FIXME: store a reference to the value in the return Map from collisions
+				let value = self.get(&key)?.expect("The key has been returned by the iterator; qed");
+				// FIXME: only need need to copy the value if it isn't stored in a single field
+				collision_file.put(&key, &value.to_vec());
+			}
+
+			// FIXME: serialize metadata
+			self.metadata.add_prefix_collision(*prefix);
+		}
+
+		let deletions = collisions.values().flat_map(|ks| ks).map(|k| Operation::Delete(k));
+
+		{ // delete colliding keys
+			let flush = Flush::new(
+				&self.path,
+				&self.options,
+				unsafe { self.mmap.as_slice() },
+				&self.metadata,
+				deletions)?;
+
+			flush.flush(unsafe { self.mmap.as_mut_slice() }, unsafe { self.metadata_mmap.as_mut_slice() }, &mut self.metadata);
+			self.mmap.flush()?;
+			self.metadata_mmap.flush()?;
+			flush.delete()?;
+		}
+
+		Ok(())
 	}
 }
 

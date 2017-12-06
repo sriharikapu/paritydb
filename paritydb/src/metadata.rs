@@ -1,5 +1,7 @@
 use prefix_tree::PrefixTree;
 
+use std::collections::HashSet;
+
 /// A structure holding database metadata information.
 ///
 /// Currently we store a prefix tree for fast lookups and iterations
@@ -14,6 +16,9 @@ pub struct Metadata {
 	pub occupied_bytes: u64,
 	/// Prefix tree
 	pub prefixes: PrefixTree,
+	/// Prefixes with too many collisions that are stored separately
+	/// FIXME: this is currently not serialized
+	pub collided_prefixes: HashSet<u32>,
 }
 
 impl Metadata {
@@ -39,6 +44,10 @@ impl Metadata {
 		self.occupied_bytes += new_len as u64;
 	}
 
+	pub fn add_prefix_collision(&mut self, prefix: u32) {
+		self.collided_prefixes.insert(prefix);
+	}
+
 	/// Returns bytes representation of `Metadata`.
 	pub fn as_bytes(&self) -> bytes::Metadata {
 		bytes::Metadata::new(self)
@@ -47,6 +56,7 @@ impl Metadata {
 
 /// Metadata bytes manipulations.
 pub mod bytes {
+	use std::collections::HashSet;
 	use byteorder::{LittleEndian, ByteOrder};
 
 	use prefix_tree::PrefixTree;
@@ -96,14 +106,15 @@ pub mod bytes {
 		let occupied_bytes = LittleEndian::read_u64(&data[Metadata::VERSION_SIZE..]);
 		let prefixes = PrefixTree::from_leaves(&data[leaves_offset()..], prefix_bits);
 
+		let collided_prefixes = HashSet::new();
+
 		assert_eq!(db_version, super::Metadata::DB_VERSION);
 
 		super::Metadata {
 			db_version,
 			occupied_bytes,
 			prefixes,
+			collided_prefixes,
 		}
 	}
 }
-
-
