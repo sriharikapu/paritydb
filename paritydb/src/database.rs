@@ -331,10 +331,10 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 					};
 				},
 				(IteratorValue::None, IteratorValue::DB(r)) => {
-					return Some(Ok((r.key_raw_slice(), Value::from(r))));
+					return Some(Ok((r.key(), Value::from(r))));
 				},
 				(IteratorValue::Journal(o), IteratorValue::DB(r)) => {
-					let ord = r.key_cmp(o.key()).expect(
+					let ord = r.key().partial_cmp(o.key()).expect(
 						"only returns None when compared keys don't have the same size; \
 						 all keys should have the same size; qed");
 
@@ -355,7 +355,7 @@ impl<'a> Iterator for DatabaseIterator<'a> {
 						},
 						Ordering::Less => {
 							self.pending = IteratorValue::Journal(o);
-							return Some(Ok((r.key_raw_slice(), Value::from(r))));
+							return Some(Ok((r.key(), Value::from(r))));
 						},
 					};
 				},
