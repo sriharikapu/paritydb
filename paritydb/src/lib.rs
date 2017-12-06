@@ -68,6 +68,7 @@ extern crate matches;
 #[macro_use]
 extern crate quickcheck;
 
+mod collision;
 mod database;
 mod error;
 mod field;
