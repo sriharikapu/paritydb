@@ -27,6 +27,7 @@ pub enum Value<'a> {
 	Raw(&'a [u8]),
 	/// DB record
 	Record(Record<'a>),
+	Owned(Vec<u8>),
 }
 
 impl<'a> Value<'a> {
@@ -39,7 +40,8 @@ impl<'a> Value<'a> {
 				v.resize(record.value_len(), 0);
 				record.read_value(&mut v);
 				v
-			}
+			},
+			Value::Owned(ref vec) => vec.clone(),
 		}
 	}
 }
@@ -49,6 +51,7 @@ impl<'a, T: AsRef<[u8]>> PartialEq<T> for Value<'a> {
 		match *self {
 			Value::Raw(slice) => slice == other.as_ref(),
 			Value::Record(ref record) => record.value_is_equal(other.as_ref()),
+			Value::Owned(ref vec) => *vec == other.as_ref(),
 		}
 	}
 }
@@ -223,6 +226,15 @@ impl Database {
 			return Ok(None);
 		}
 
+		if self.metadata.collided_prefixes.get(key.prefix as usize).unwrap_or(false) {
+			let collision_file = Collision::open(&self.path, key.prefix)?;
+			if let Some(mut c) = collision_file {
+				return Ok(c.get(key.key)?.map(Value::Owned))
+			} else {
+				return Ok(None)
+			}
+		}
+
 		let offset = key.prefix as usize * self.options.record_offset;
 		let data = unsafe { &self.mmap.as_slice()[offset..] };
 
@@ -288,11 +300,10 @@ impl Database {
 			for key in keys {
 				// FIXME: store a reference to the value in the return Map from collisions
 				let value = self.get(&key)?.expect("The key has been returned by the iterator; qed");
-				// FIXME: only need need to copy the value if it isn't stored in a single field
+				// FIXME: only need to copy the value if it isn't stored in a single field
 				collision_file.put(&key, &value.to_vec());
 			}
 
-			// FIXME: serialize metadata
 			self.metadata.add_prefix_collision(*prefix);
 		}
 
