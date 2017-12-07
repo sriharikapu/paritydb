@@ -1,6 +1,8 @@
-use prefix_tree::PrefixTree;
-
 use std::collections::HashSet;
+
+use bit_vec::BitVec;
+
+use prefix_tree::PrefixTree;
 
 /// A structure holding database metadata information.
 ///
@@ -17,8 +19,7 @@ pub struct Metadata {
 	/// Prefix tree
 	pub prefixes: PrefixTree,
 	/// Prefixes with too many collisions that are stored separately
-	/// FIXME: this is currently not serialized
-	pub collided_prefixes: HashSet<u32>,
+	pub collided_prefixes: BitVec<u8>,
 }
 
 impl Metadata {
@@ -45,7 +46,7 @@ impl Metadata {
 	}
 
 	pub fn add_prefix_collision(&mut self, prefix: u32) {
-		self.collided_prefixes.insert(prefix);
+		self.collided_prefixes.set(prefix as usize, true);
 	}
 
 	/// Returns bytes representation of `Metadata`.
@@ -57,7 +58,10 @@ impl Metadata {
 /// Metadata bytes manipulations.
 pub mod bytes {
 	use std::collections::HashSet;
-	use byteorder::{LittleEndian, ByteOrder};
+	use std::io::{Cursor, Read, Write};
+
+	use bit_vec::BitVec;
+	use byteorder::{LittleEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 
 	use prefix_tree::PrefixTree;
 
@@ -78,10 +82,13 @@ pub mod bytes {
 		/// Copy bytes to given slice.
 		/// Panics if the length are not matching.
 		pub fn copy_to_slice(&self, data: &mut [u8]) {
+			let mut cursor = Cursor::new(data);
+			cursor.write_u16::<LittleEndian>(self.metadata.db_version);
+			cursor.write_u64::<LittleEndian>(self.metadata.occupied_bytes);
+			cursor.write_all(self.metadata.collided_prefixes.storage());
+
 			let leaves = self.metadata.prefixes.leaves();
-			data[leaves_offset()..].copy_from_slice(leaves);
-			LittleEndian::write_u16(data, self.metadata.db_version);
-			LittleEndian::write_u64(&mut data[Self::VERSION_SIZE..], self.metadata.occupied_bytes);
+			cursor.write_all(leaves);
 		}
 
 		/// Return bytes length of the `Metadata`.
@@ -90,23 +97,40 @@ pub mod bytes {
 		}
 	}
 
-	#[inline]
-	pub fn leaves_offset() -> usize {
-		Metadata::VERSION_SIZE + Metadata::OCCUPIED_SIZE
-	}
-
 	/// Returns expected `Metadata` bytes len given prefix bits.
 	pub fn len(prefix_bits: u8) -> usize {
-		leaves_offset() + PrefixTree::leaf_data_len(prefix_bits)
+		Metadata::VERSION_SIZE +
+			Metadata::OCCUPIED_SIZE +
+			((2 << (prefix_bits - 1)) / 8) + // for the collided_prefixes bitvec
+			PrefixTree::leaf_data_len(prefix_bits)
 	}
 
 	/// Read `Metadata` from given slice.
 	pub fn read(data: &[u8], prefix_bits: u8) -> super::Metadata {
-		let db_version = LittleEndian::read_u16(&data[..Metadata::VERSION_SIZE]);
-		let occupied_bytes = LittleEndian::read_u64(&data[Metadata::VERSION_SIZE..]);
-		let prefixes = PrefixTree::from_leaves(&data[leaves_offset()..], prefix_bits);
+		let mut cursor = Cursor::new(data);
+		let db_version = cursor.read_u16::<LittleEndian>().unwrap();
+		let occupied_bytes = cursor.read_u64::<LittleEndian>().unwrap();
 
-		let collided_prefixes = HashSet::new();
+		let collided_prefixes_len = (2 << (prefix_bits - 1)) / 8;
+		let mut collided_prefixes_buf = vec![0; collided_prefixes_len];
+		cursor.read_exact(&mut collided_prefixes_buf);
+
+		let mut collided_prefixes = BitVec::default();
+		collided_prefixes.grow(2 << (prefix_bits - 1), false);
+		for (idx, byte) in collided_prefixes_buf.iter().enumerate() {
+			let mut current = 1;
+			for i in 0..8 {
+				if byte & current == current {
+					collided_prefixes.set((idx * 8 + i), true);
+				}
+				current <<= 1;
+			}
+		}
+
+		let prefixes_len = PrefixTree::leaf_data_len(prefix_bits);
+		let mut prefixes_buf = vec![0; prefixes_len];
+		cursor.read_exact(&mut prefixes_buf);
+		let prefixes = PrefixTree::from_leaves(&prefixes_buf, prefix_bits);
 
 		assert_eq!(db_version, super::Metadata::DB_VERSION);
 
