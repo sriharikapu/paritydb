@@ -186,22 +186,43 @@ impl Database {
 
 		let to_flush = cmp::min(len - self.options.external.journal_eras, max);
 
+		let prefix_bits = self.options.external.key_index_bits;
+		let metadata = self.metadata.clone();
+
 		for era in self.journal.drain_front(to_flush) {
-			let flush = Flush::new(
-				&self.path,
-				&self.options,
-				unsafe { self.mmap.as_slice() },
-				&self.metadata,
-				era.iter(),
-			)?;
-			era.delete()?;
-			// TODO: metadata should be a single structure
-			// updating self.metadata should happen after all calls
-			// which may fail ("?")
-			flush.flush(unsafe { self.mmap.as_mut_slice() }, unsafe { self.metadata_mmap.as_mut_slice() }, &mut self.metadata);
-			self.mmap.flush()?;
-			self.metadata_mmap.flush()?;
-			flush.delete()?;
+			{
+				let (collided_operations, operations): (Vec<_>, Vec<_>) =
+					era.iter().partition(|op| {
+						let key = Key::new(op.key(), prefix_bits);
+						metadata.collided_prefix(key.prefix)
+					});
+
+				for op in collided_operations {
+					let key = Key::new(op.key(), prefix_bits);
+					let collision_file = Collision::open(&self.path, key.prefix)?;
+					let mut collision_file =
+						collision_file.expect("prefix is declared as collided; collision file should exist; qed");
+
+					collision_file.apply(op);
+				}
+
+				let flush = Flush::new(
+					&self.path,
+					&self.options,
+					unsafe { self.mmap.as_slice() },
+					&self.metadata,
+					operations.into_iter(),
+				)?;
+				// TODO: metadata should be a single structure
+				// updating self.metadata should happen after all calls
+				// which may fail ("?")
+				flush.flush(unsafe { self.mmap.as_mut_slice() }, unsafe { self.metadata_mmap.as_mut_slice() }, &mut self.metadata);
+				self.mmap.flush()?;
+				self.metadata_mmap.flush()?;
+				flush.delete()?;
+			}
+
+			era.delete();
 		}
 
 		Ok(())
@@ -226,7 +247,7 @@ impl Database {
 			return Ok(None);
 		}
 
-		if self.metadata.collided_prefixes.get(key.prefix as usize).unwrap_or(false) {
+		if self.metadata.collided_prefix(key.prefix) {
 			let collision_file = Collision::open(&self.path, key.prefix)?;
 			if let Some(mut c) = collision_file {
 				return Ok(c.get(key.key)?.map(Value::Owned))
@@ -267,7 +288,8 @@ impl Database {
 		let mut collisions: BTreeMap<u32, Vec<Vec<u8>>> = BTreeMap::new();
 
 		// iterate through the database to find the load factor of each prefix
-		// NOTE: this should only iterate through the journal and data file (shouldn't search collision files)
+		// FIXME: this should only iterate through the data file (shouldn't search journal or
+		// collision files)
 		for r in self.iter()? {
 			let (key, _) = r?;
 
@@ -294,6 +316,7 @@ impl Database {
 	pub fn compact(&mut self) -> Result<()> {
 		let collisions = self.collisions()?;
 
+		let mut collided_prefixes = Vec::new();
 		for (prefix, keys) in collisions.iter() {
 			let mut collision_file = Collision::create(&self.path, *prefix)?;
 
@@ -304,12 +327,13 @@ impl Database {
 				collision_file.put(&key, &value.to_vec());
 			}
 
-			self.metadata.add_prefix_collision(*prefix);
+			collided_prefixes.push(prefix);
 		}
 
 		let deletions = collisions.values().flat_map(|ks| ks).map(|k| Operation::Delete(k));
 
-		{ // delete colliding keys
+		// delete colliding keys
+		{
 			let flush = Flush::new(
 				&self.path,
 				&self.options,
@@ -319,8 +343,21 @@ impl Database {
 
 			flush.flush(unsafe { self.mmap.as_mut_slice() }, unsafe { self.metadata_mmap.as_mut_slice() }, &mut self.metadata);
 			self.mmap.flush()?;
-			self.metadata_mmap.flush()?;
 			flush.delete()?;
+		}
+
+		// update metadata
+		{
+			for prefix in collided_prefixes {
+				self.metadata.add_prefix_collision(*prefix);
+			}
+
+			{
+				let raw_metadata = unsafe { self.metadata_mmap.as_mut_slice() };
+				self.metadata.as_bytes().copy_to_slice(raw_metadata);
+			}
+
+			self.metadata_mmap.flush()?;
 		}
 
 		Ok(())

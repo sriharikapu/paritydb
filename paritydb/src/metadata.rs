@@ -49,6 +49,10 @@ impl Metadata {
 		self.collided_prefixes.set(prefix as usize, true);
 	}
 
+	pub fn collided_prefix(&self, prefix: u32) -> bool {
+		self.collided_prefixes.get(prefix as usize).unwrap_or(false)
+	}
+
 	/// Returns bytes representation of `Metadata`.
 	pub fn as_bytes(&self) -> bytes::Metadata {
 		bytes::Metadata::new(self)

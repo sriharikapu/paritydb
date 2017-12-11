@@ -5,13 +5,16 @@ use std::path::{Path, PathBuf};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
 use error::Result;
+use transaction::Operation;
 
-/// A data file representing all the data for a given prefix.  All the data for
+/// A data file representing all the data for a given prefix. All the data for
 /// this prefix exists in this file because there was a high threshold of
 /// collisions.
 ///
 /// Idea: use exactly the same strategy as used for the data file but ignoring
 /// the first `n` bits of the prefix and adding extra bits as needed
+///
+/// Temporary: on-load iterate through file to build in-memory index (with BTreeMap)
 pub struct Collision {
 	prefix: u32,
 	file: File,
@@ -62,6 +65,11 @@ impl Collision {
 		Ok(())
 	}
 
+	pub fn delete(&mut self, key: &[u8]) -> Result<()> {
+		// TODO
+		Ok(())
+	}
+
 	fn get_aux(&mut self, key: &[u8]) -> io::Result<Vec<u8>> {
 		self.file.seek(SeekFrom::Start(0))?;
 
@@ -88,6 +96,13 @@ impl Collision {
 			Err(err) => Err(err.into())
 		}
 	}
+
+	pub fn apply(&mut self, op: Operation) -> Result<()> {
+		match op {
+			Operation::Delete(key) => self.delete(key),
+			Operation::Insert(key, value) => self.put(key, value),
+		}
+	}
 }
 
 #[cfg(test)]
@@ -104,9 +119,7 @@ mod tests {
 			let mut collision = Collision::create(temp.path(), 0).unwrap();
 			collision.put(b"hello", b"world").unwrap();
 			assert_eq!(collision.get(b"hello").unwrap().unwrap(), b"world");
-
 		}
-
 
 		let mut collision = Collision::open(temp.path(), 0).unwrap().unwrap();
 		assert_eq!(collision.get(b"hello").unwrap().unwrap(), b"world");
