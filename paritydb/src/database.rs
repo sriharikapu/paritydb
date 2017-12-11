@@ -12,6 +12,7 @@ use memmap::{Mmap, Protection};
 use collision::Collision;
 use error::{ErrorKind, Result};
 use find;
+use find::RecordIterator;
 use flush::Flush;
 use journal::Journal;
 use key::Key;
@@ -268,6 +269,14 @@ impl Database {
 
 	/// Returns an iterator over the database key-value pairs.
 	pub fn iter(&self) -> Result<DatabaseIterator> {
+		let record_iter = self.record_iter()?;
+		let journal_iter = self.journal.iter();
+		let pending = IteratorValue::None;
+
+		Ok(DatabaseIterator { record_iter, journal_iter, pending })
+	}
+
+	fn record_iter(&self) -> Result<RecordIterator> {
 		let data = unsafe { &self.mmap.as_slice() };
 		let occupied_offset_iter = self.metadata.prefixes.prefixes_iter();
 		let field_body_size = self.options.field_body_size;
@@ -275,10 +284,8 @@ impl Database {
 		let value_size = self.options.value_size;
 
 		let record_iter = find::iter(data, occupied_offset_iter, field_body_size, key_size, value_size)?;
-		let journal_iter = self.journal.iter();
-		let pending = IteratorValue::None;
 
-		Ok(DatabaseIterator { record_iter, journal_iter, pending })
+		Ok(record_iter)
 	}
 
 	fn collisions(&self) -> Result<BTreeMap<u32, Vec<Vec<u8>>>> {
@@ -287,11 +294,8 @@ impl Database {
 		// FIXME: this is currently copying keys
 		let mut collisions: BTreeMap<u32, Vec<Vec<u8>>> = BTreeMap::new();
 
-		// iterate through the database to find the load factor of each prefix
-		// FIXME: this should only iterate through the data file (shouldn't search journal or
-		// collision files)
-		for r in self.iter()? {
-			let (key, _) = r?;
+		for record in self.record_iter()? {
+			let key = record?.key_raw_slice();
 
 			let prefix = Key::new(key, self.options.external.key_index_bits).prefix;
 			match collisions.entry(prefix) {

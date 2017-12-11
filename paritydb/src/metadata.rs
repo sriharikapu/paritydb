@@ -119,6 +119,7 @@ pub mod bytes {
 		let mut collided_prefixes_buf = vec![0; collided_prefixes_len];
 		cursor.read_exact(&mut collided_prefixes_buf);
 
+		// FIXME: clean this up
 		let mut collided_prefixes = BitVec::default();
 		collided_prefixes.grow(2 << (prefix_bits - 1), false);
 		for (idx, byte) in collided_prefixes_buf.iter().enumerate() {
